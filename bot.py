@@ -555,8 +555,11 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("soporte", lambda u, c: u.message.reply_text(f"Soporte oficial VIP: {SUPPORT_USER}", reply_markup=get_back_keyboard())))
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("marcar_verde", cmd_marcar_verde))
+    app.add_handler(CommandHandler("verde", cmd_marcar_verde))
     app.add_handler(CommandHandler("nuevo_pick", cmd_nuevo_pick))
+    app.add_handler(CommandHandler("pick", cmd_nuevo_pick))
     app.add_handler(CommandHandler("difusion", cmd_difusion))
+
 
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
