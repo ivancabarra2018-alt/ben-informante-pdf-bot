@@ -38,6 +38,7 @@ from handlers.content import (
     format_receipt_instructions, TERMS_TEXT
 )
 from handlers.receipt_checker import verify_receipt_with_ai
+from handlers.daily_engine import autonomous_daily_engine, rotate_picks_for_today
 
 # Logging
 logging.basicConfig(
@@ -167,6 +168,9 @@ async def build_admin_panel():
         [
             InlineKeyboardButton(f"🧾 Justificantes ({stats['pending_receipts']})", callback_data="admin_list_receipts"),
             InlineKeyboardButton("🔄 Refrescar Panel", callback_data="admin_refresh")
+        ],
+        [
+            InlineKeyboardButton("🤖 Rotar al Partido de Mañana", callback_data="admin_force_rotate")
         ],
         [
             InlineKeyboardButton("⚽ Modificar Manual Gratis", callback_data="admin_info_freepick"),
@@ -696,6 +700,21 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
+    # 8a. Administración: Forzar Rotación Autónoma de Partidos
+    elif data == "admin_force_rotate":
+        if not await is_admin_user(user.id):
+            return
+        await query.edit_message_text("🤖 Ejecutando rotación autónoma de pronósticos...")
+        fixture = await rotate_picks_for_today(context.bot)
+        panel_text, panel_kb = await build_admin_panel()
+        await query.message.reply_text(
+            f"✅ *¡Rotación Autónoma Completada!*\n\n"
+            f"• ⚽ *Hoy:* {fixture['free_match']['title']} ({fixture['free_match']['competition']})\n"
+            f"• 👑 *Mañana:* {fixture['next_match']['title']} ({fixture['next_match']['competition']})",
+            reply_markup=panel_kb,
+            parse_mode=ParseMode.MARKDOWN
+        )
+
     # 8b. Administración: Seleccionar Partido Real de Hoy
     elif data == "admin_choose_real_pick":
         if not await is_admin_user(user.id):
@@ -992,8 +1011,10 @@ async def main():
     await setup_commands(app)
     await app.start()
     await app.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+    asyncio.create_task(autonomous_daily_engine(app.bot))
 
     logger.info(f"🟢 {BOT_NAME} está en línea y escuchando actualizaciones.")
+    logger.info("🤖 Motor autónomo de rotación diaria 24/7 iniciado con éxito.")
 
     stop_event = asyncio.Event()
     try:
