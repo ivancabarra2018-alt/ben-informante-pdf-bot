@@ -848,7 +848,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode=ParseMode.MARKDOWN
         )
 
-    # 11. Aprobación y Rechazo de Justificantes (con Reseteo de Bot)
+    # 11. Aprobación y Rechazo de Justificantes (con Reseteo de Bot y Entrega de Mañana)
     elif data.startswith("rcpt_approve:"):
         if not await is_admin_user(user.id):
             return
@@ -857,26 +857,31 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if receipt:
             try:
                 await query.edit_message_caption(
-                    caption=(query.message.caption or "") + "\n\n✅ *ESTADO: APROBADO Y BOT RESETEADO*",
+                    caption=(query.message.caption or "") + "\n\n✅ *ESTADO: APROBADO Y BOT RESETEADO (APUESTA DE MAÑANA ENTREGADA)*",
                     parse_mode=ParseMode.MARKDOWN
                 )
             except Exception:
                 pass
 
             target_uid = receipt["user_id"]
+            tomorrow_pick = await get_next_paid_pick()
+            pick_text = format_paid_pick(tomorrow_pick)
+
             kb_user = InlineKeyboardMarkup([
-                [InlineKeyboardButton("👑 Ver Siguiente Pronóstico", callback_data="view_pick")]
+                [InlineKeyboardButton("👑 Ver Apuesta de Mañana", callback_data="view_pick")],
+                [InlineKeyboardButton("💬 Soporte Oficial", url=SUPPORT_URL)]
             ])
             try:
+                delivery_message = (
+                    f"🎉 *¡PAGO DE {PRICE_EUR} VERIFICADO CON ÉXITO!* 🎉\n"
+                    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    "Tu bot **se ha reseteado** y tu acceso ha sido validado.\n\n"
+                    "Tal y como acordamos, aquí tienes tu **Apuesta del Día Siguiente (Mañana)**:\n\n"
+                    f"{pick_text}"
+                )
                 await context.bot.send_message(
                     chat_id=target_uid,
-                    text=(
-                        f"🎉 *¡PAGO DE {PRICE_EUR} VERIFICADO CON ÉXITO!* 🎉\n"
-                        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                        "Tu justificante ha sido validado y **tu bot se ha reseteado**.\n"
-                        "Ya tienes acceso exclusivo al **Siguiente Pronóstico**.\n\n"
-                        "👇 *Pulsa el botón para ver el pronóstico completo:*"
-                    ),
+                    text=delivery_message,
                     reply_markup=kb_user,
                     parse_mode=ParseMode.MARKDOWN
                 )

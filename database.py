@@ -19,10 +19,22 @@ async def init_db():
                 is_admin INTEGER DEFAULT 0,
                 has_paid_access INTEGER DEFAULT 0,
                 has_seen_free_pick INTEGER DEFAULT 0,
+                paid_count INTEGER DEFAULT 0,
+                consumed_free_victory INTEGER DEFAULT 0,
                 joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+
+        # Migraciones para tablas existentes
+        try:
+            await db.execute("ALTER TABLE users ADD COLUMN paid_count INTEGER DEFAULT 0")
+        except Exception:
+            pass
+        try:
+            await db.execute("ALTER TABLE users ADD COLUMN consumed_free_victory INTEGER DEFAULT 0")
+        except Exception:
+            pass
 
         await db.execute("""
             CREATE TABLE IF NOT EXISTS picks (
@@ -86,28 +98,28 @@ async def seed_or_update_real_picks(db):
         "Menos de 2.5 Goles",
         1.68,
         2.0,
-        "Análisis de Datos y Estadísticas Reales:\n"
-        "• El Getafe de Bordalás en el Coliseum concede menos de 0.9 xG y prioriza el rigor táctico defensivo.\n"
-        "• El Celta de Vigo lejos de Balaídos acusa problemas de definición (promedia 0.95 goles por salida).\n"
+        "Análisis Táctico de Rigor Defensivo:\n"
+        "• El Getafe de José Bordalás en el Coliseum concede apenas 0.88 xG por encuentro, apostando a un planteamiento de pocas concesiones y presión física.\n"
+        "• El Celta de Vigo fuera de Balaídos acusa dificultades históricas de pegada (promedia menos de 1 gol por salida).\n"
         "• En 4 de los últimos 5 duelos directos entre ambos se cumplió el Menos de 2.5 goles.\n"
-        "• Probabilidad matemática calculada: 67% (+EV frente a cuota 1.68)."
+        "• Probabilidad matemática calculada: 67% (+EV frente a cuota 1.68 en operadores oficiales)."
     ))
 
-    # 2. Siguiente Pronóstico de Pago por 7.99€ (LaLiga EA Sports)
+    # 2. Siguiente Pronóstico de Pago por 7.99€ (Apuesta del Día Siguiente / Mañana)
     await db.execute("""
         INSERT INTO picks (match_title, competition, match_time, selection, odds, stake, analysis, status, is_vip_next, is_active)
         VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDIENTE', 1, 1)
     """, (
-        "Elche CF vs Real Sociedad",
-        "LaLiga EA Sports",
-        "Hoy a las 21:30 h",
-        "Real Sociedad gana o empata + Menos de 3.5 Goles",
-        1.75,
+        "Internazionale vs Real Madrid",
+        "UEFA Champions League",
+        "Mañana a las 21:00 h",
+        "Real Madrid gana o empata + Más de 1.5 Goles",
+        1.82,
         2.5,
-        "Análisis Exclusivo VIP (+EV):\n"
-        "• La Real Sociedad cuenta con una de las zagas más sólidas de la liga y un 59% de posesión media.\n"
-        "• El Elche plantea bloques replegados en casa para frenar la circulación rival.\n"
-        "• Línea de cuota 1.75 en combinada con un 68% de probabilidad esperada."
+        "Análisis Confidencial Champions League (Día Siguiente):\n"
+        "• El Real Madrid en competición europea promedia 2.3 goles esperados y una efectividad extrema en transiciones ofensivas.\n"
+        "• El Inter en San Siro asume riesgos adelantando líneas defensivas, lo que deja espacios críticos a la espalda de sus carrileros.\n"
+        "• Cuota combinada de alto valor estadístico (+EV 1.82 con 68% de probabilidad esperada)."
     ))
     await db.commit()
 
@@ -131,7 +143,7 @@ async def get_user(user_id: int) -> dict:
             row = await cursor.fetchone()
             if row:
                 return dict(row)
-            return {"user_id": user_id, "is_admin": 0, "has_paid_access": 0, "has_seen_free_pick": 0}
+            return {"user_id": user_id, "is_admin": 0, "has_paid_access": 0, "has_seen_free_pick": 0, "paid_count": 0, "consumed_free_victory": 0}
 
 async def make_admin(user_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
@@ -196,7 +208,7 @@ async def get_free_pick() -> dict:
             return dict(row) if row else {}
 
 async def get_next_paid_pick() -> dict:
-    """Obtiene el siguiente pronóstico exclusivo de pago (7.99€)."""
+    """Obtiene el siguiente pronóstico exclusivo de pago (Apuesta de Mañana por 7.99€)."""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute("SELECT * FROM picks WHERE is_vip_next = 1 AND is_active = 1 ORDER BY id DESC LIMIT 1") as cursor:
@@ -204,7 +216,13 @@ async def get_next_paid_pick() -> dict:
             return dict(row) if row else {}
 
 async def mark_free_pick_won() -> dict:
-    """Marca la apuesta gratuita como ACERTADO (VERDE)."""
+    """
+    Marca la apuesta gratuita como ACERTADO (VERDE).
+    REGLA: A todos los que vieron el pronóstico gratis y NO pagaron,
+    se les marca consumed_free_victory = 1.
+    Esto garantiza que no puedan recibir otro pronóstico gratis ni beneficiarse de fallos futuros:
+    ya tuvieron su acierto gratis y si no pagan, quedan bloqueados para siempre.
+    """
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute("SELECT id FROM picks WHERE is_vip_next = 0 AND is_active = 1 ORDER BY id DESC LIMIT 1") as cursor:
@@ -212,7 +230,15 @@ async def mark_free_pick_won() -> dict:
             if row:
                 pick_id = row[0]
                 await db.execute("UPDATE picks SET status = 'ACERTADO' WHERE id = ?", (pick_id,))
+                
+                # Bloquear permanentemente el acceso gratis a los que vieron el verde y no pagaron
+                await db.execute("""
+                    UPDATE users 
+                    SET consumed_free_victory = 1 
+                    WHERE has_seen_free_pick = 1 AND has_paid_access = 0
+                """)
                 await db.commit()
+
                 async with db.execute("SELECT * FROM picks WHERE id = ?", (pick_id,)) as c2:
                     return dict(await c2.fetchone())
             return {}
@@ -220,9 +246,12 @@ async def mark_free_pick_won() -> dict:
 async def mark_pick_lost_and_compensate_all() -> tuple[dict, int]:
     """
     Marca la apuesta como FALLADO (ROJO).
-    RESETEA EL BOT A TODOS LOS USUARIOS:
-    Tanto a los nuevos usuarios que recibieron el pronóstico gratis como a los que pagaron,
-    se les resetea has_seen_free_pick = 0 para que el siguiente día lo vean GRATIS sin pagar.
+    REGLA ESTRICTA DE COMPENSACIÓN:
+    Solo se resetea a:
+    1. Los que pagaron recientemente (has_paid_access == 1 o paid_count > 0).
+    2. Los nuevos que entraron y estaban en su primera prueba gratuita (consumed_free_victory == 0 AND has_seen_free_pick == 1).
+    LOS QUE YA COGIERON UN GRATIS EN EL PASADO QUE SE ACERTÓ Y NO VOLVIERON A PAGAR (consumed_free_victory == 1)
+    NO SE RESETEAN NUNCA.
     """
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
@@ -235,8 +264,13 @@ async def mark_pick_lost_and_compensate_all() -> tuple[dict, int]:
                 async with db.execute("SELECT * FROM picks WHERE id = ?", (pick_id,)) as c2:
                     pick_dict = dict(await c2.fetchone())
 
-        # Resetear el bot para todos los usuarios activos
-        cursor_users = await db.execute("UPDATE users SET has_seen_free_pick = 0, has_paid_access = 1")
+        # Resetear ÚNICAMENTE a los que pagaron O a nuevos en su primera prueba fallida
+        cursor_users = await db.execute("""
+            UPDATE users 
+            SET has_seen_free_pick = 0, has_paid_access = 1 
+            WHERE (has_paid_access = 1) 
+               OR (consumed_free_victory = 0 AND has_seen_free_pick = 1)
+        """)
         total_reset = cursor_users.rowcount
         await db.commit()
         return pick_dict, total_reset
@@ -248,7 +282,7 @@ async def mark_user_viewed_free_pick(user_id: int):
         await db.commit()
 
 async def mark_user_viewed_paid_pick(user_id: int):
-    """El usuario que pagó ve el pronóstico de hoy; consumió su acceso pagado hasta el próximo ciclo."""
+    """El usuario que pagó ve el pronóstico; consumió este ciclo pagado."""
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("UPDATE users SET has_seen_free_pick = 1, has_paid_access = 0 WHERE user_id = ?", (user_id,))
         await db.commit()
@@ -292,7 +326,7 @@ async def get_pending_receipts() -> list[dict]:
 async def approve_receipt_and_reset_user(receipt_id: int) -> dict:
     """
     Aprueba el comprobante de pago de 7.99€ y RESETA EL BOT DEL USUARIO.
-    Al resetearse, el de mañana / siguiente lo verá como acceso activo (has_seen_free_pick = 0).
+    Al resetearse, se le otorga acceso a la apuesta de mañana (has_paid_access = 1, has_seen_free_pick = 0).
     """
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
@@ -302,10 +336,13 @@ async def approve_receipt_and_reset_user(receipt_id: int) -> dict:
             if row:
                 r_dict = dict(row)
                 target_uid = r_dict["user_id"]
-                # RESETEAR EL BOT AL USUARIO: tiene acceso pagado y su vista se resetea a 0
+                # RESETEAR EL BOT AL USUARIO: se le activa acceso pagado, se le borra el bloqueo
                 await db.execute("""
                     UPDATE users 
-                    SET has_paid_access = 1, has_seen_free_pick = 0 
+                    SET has_paid_access = 1, 
+                        has_seen_free_pick = 0, 
+                        consumed_free_victory = 0,
+                        paid_count = paid_count + 1 
                     WHERE user_id = ?
                 """, (target_uid,))
                 await db.commit()
