@@ -93,21 +93,19 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["waiting_for_question"] = False
 
     welcome_text = (
-        f"👋 *Bienvenido/a a {BOT_NAME}*, {user.first_name}.\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "Somos una plataforma formativa y de consultoría ejecutiva para emprendedores, "
-        "profesionales y empresas que desean rentabilizar la Inteligencia Artificial.\n\n"
-        "🎁 *Tu acceso de bienvenida incluye:*\n"
-        "• 📚 *2 Lecciones magistrales completas* de implementación inmediata.\n"
-        "• 🤖 *2 Consultas estratégicas gratuitas* atendidas en tiempo real por nuestro motor de Consultoría IA Senior.\n"
-        "• 📊 Acceso a las normativas, casos prácticos y soporte oficial.\n\n"
-        "👇 *Selecciona una opción del menú inferior para comenzar:*"
+        f"👋 *¡Hola, {user.first_name}! Bienvenido a Ben Informante.*\n\n"
+        "🚀 *Tu Consultor y Academia de Negocios con IA:*\n"
+        "• 🎓 *2 Lecciones prácticas:* Automatización y monetización digital.\n"
+        "• 🤖 *2 Consultas IA gratis:* Pregúntale a nuestro experto cualquier duda sobre tu negocio o proyecto.\n"
+        "• ⭐ *Membresía PRO:* Acceso ilimitado a consultoría y recursos avanzados.\n\n"
+        "👇 *Selecciona una opción para comenzar:*"
     )
     await update.message.reply_text(
         welcome_text,
         reply_markup=get_main_keyboard(),
         parse_mode=ParseMode.MARKDOWN
     )
+
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
@@ -407,7 +405,18 @@ async def setup_commands(app: Application):
         BotCommand("soporte", "💬 Contacto y atención"),
     ]
     await app.bot.set_my_commands(commands)
-    logger.info("✅ 7 comandos oficiales registrados en Telegram")
+    try:
+        await app.bot.set_my_description(
+            "Academia de Negocios Digitales & Consultoría con IA. "
+            "Aprende automatización, modelos de monetización y resuelve tus dudas con nuestro consultor IA en tiempo real."
+        )
+        await app.bot.set_my_short_description(
+            "Academia de Negocios Digitales y Consultor Estratégico IA."
+        )
+    except Exception as e:
+        logger.warning(f"No se pudo actualizar descripción: {e}")
+    logger.info("✅ 7 comandos oficiales y descripciones registrados en Telegram")
+
 
 # ── Inicialización y Main ───────────────────────────────────────────────────
 

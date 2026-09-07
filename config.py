@@ -29,7 +29,8 @@ OFFICIAL_CHANNEL = "https://t.me/Accedogratis_bot"
 FREE_QUESTIONS_LIMIT = 2
 
 # Precio oficial en Euros para transparencia y cumplimiento de Telegram Ads
-PRICE_EUR = "19.99€/mes"
+PRICE_EUR = "1.99€/mes"
+
 
 # Base de datos
 DB_PATH = os.path.join(os.path.dirname(__file__), "data", "business_academy.db")
