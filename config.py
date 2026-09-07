@@ -15,8 +15,9 @@ BOT_NAME = "Ben Informante | Negocios & IA"
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
 
-# Enlace de pago oficial para la membresía PRO (editable en cualquier momento)
-PAYMENT_URL = os.getenv("PAYMENT_URL", "https://t.me/Accedogratis_bot?start=membresia_pro")
+# Enlace de pago oficial para la membresía PRO
+PAYMENT_URL = os.getenv("PAYMENT_URL", "https://store.kunfupay.com/elprograma/pgUKnc9F")
+
 
 # Enlace o contacto de soporte
 SUPPORT_USER = "@BenInformanteSoporte"
