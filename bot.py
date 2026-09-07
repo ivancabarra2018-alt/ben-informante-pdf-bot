@@ -1,6 +1,6 @@
 """
 🤖 Accede Gratis | Pronósticos Deportivos & IA VIP (@Accedogratis_bot)
-Bot oficial de Embudo de Conversión para Tipster con Inteligencia Artificial.
+Bot oficial de Pronósticos de Fútbol Reales con IA, Detección de Aciertos y Embudo de Ventas VIP.
 Cumplimiento normativo para Telegram Ads (Unión Europea).
 """
 import os
@@ -24,12 +24,13 @@ from config import (
 )
 from database import (
     init_db, upsert_user, get_user, increment_analysis,
-    get_all_user_ids, get_stats, set_vip_status
+    get_all_user_ids, get_stats, set_vip_status,
+    get_active_free_pick, get_recent_picks, add_new_pick, mark_pick_result
 )
 from handlers.ai_expert import consult_tipster_ai
 from handlers.content import (
-    DAILY_TIP_TEXT, BANKROLL_GUIDE_TEXT, VIP_BENEFITS_TEXT,
-    TERMS_TEXT, PRIVACY_TEXT
+    format_active_pick, format_recent_history, BANKROLL_GUIDE_TEXT,
+    VIP_BENEFITS_TEXT, TERMS_TEXT, PRIVACY_TEXT
 )
 
 # Logging
@@ -44,21 +45,22 @@ logger = logging.getLogger("AccedeGratisBot")
 def get_main_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🎁 Análisis del Día (Regalo)", callback_data="view_daily_tip"),
-            InlineKeyboardButton("📚 Guía Bankroll & Stake", callback_data="view_bankroll"),
+            InlineKeyboardButton("⚽ Pronóstico del Día (Regalo)", callback_data="view_daily_pick"),
+            InlineKeyboardButton("📜 Historial de Aciertos", callback_data="view_history"),
         ],
         [
-            InlineKeyboardButton("🤖 Pedir Análisis al Experto IA (2 gratis)", callback_data="btn_ask_ai"),
+            InlineKeyboardButton("🤖 Pedir Pronóstico a la IA (2 gratis)", callback_data="btn_ask_ai"),
         ],
         [
-            InlineKeyboardButton(f"⭐ Acceso Canal VIP ({PRICE_EUR})", url=PAYMENT_URL),
+            InlineKeyboardButton(f"⭐ Entrar al Canal VIP ({PRICE_EUR})", url=PAYMENT_URL),
         ],
         [
-            InlineKeyboardButton("💎 Ventajas del VIP", callback_data="view_vip"),
+            InlineKeyboardButton("📚 Guía de Bankroll", callback_data="view_bankroll"),
+            InlineKeyboardButton("💎 Ventajas VIP", callback_data="view_vip"),
+        ],
+        [
             InlineKeyboardButton("⚖️ Términos & RGPD", callback_data="view_legal"),
-        ],
-        [
-            InlineKeyboardButton("💬 Soporte Oficial", url=SUPPORT_URL),
+            InlineKeyboardButton("💬 Soporte", url=SUPPORT_URL),
         ]
     ])
 
@@ -114,10 +116,10 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     welcome_text = (
         f"👋 *¡Hola, {user.first_name}! Bienvenido a Accede Gratis.*\n\n"
-        "🎯 *Tu Analista y Embudo de Pronósticos Deportivos con IA:*\n"
-        "• 🎁 *Análisis del Día:* Análisis táctico y estadístico de regalo.\n"
-        "• 🤖 *2 Análisis con IA gratis:* Pregúntale a la IA sobre cualquier partido o cuota.\n"
-        "• 💎 *Acceso Canal VIP:* Pronósticos diarios de alto valor por solo 1.99€ al mes.\n\n"
+        "🎯 *Pronósticos de Fútbol Reales con Inteligencia Artificial:*\n"
+        "• ⚽ *Pronóstico del Día gratis:* Partido real analizado con cuota y stake.\n"
+        "• 🤖 *2 Pronósticos con IA:* Pídele a la IA el análisis de cualquier partido de hoy.\n"
+        "• 💎 *Canal VIP:* Entre 2 y 4 pronósticos diarios verificados por solo 1.99€ al mes.\n\n"
         "👇 *Selecciona una opción para comenzar:*"
     )
     await update.message.reply_text(
@@ -130,14 +132,34 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         "📖 *Guía de Comandos Oficiales:*\n\n"
         "• /start — Menú interactivo principal\n"
-        "• /regalo — Ver el análisis del día gratuito\n"
-        "• /analisis — Formular consulta al Analista IA\n"
-        "• /vip — Información del Canal VIP\n"
+        "• /pronostico — Ver el pronóstico del día gratuito\n"
+        "• /historial — Historial de aciertos verificados\n"
+        "• /ia — Pedir un pronóstico específico a la IA\n"
+        "• /vip — Información y acceso al Canal VIP\n"
         "• /terminos — Términos y condiciones legales\n"
         "• /privacidad — Política de Privacidad RGPD\n"
         "• /soporte — Canal de atención oficial"
     )
     await update.message.reply_text(text, reply_markup=get_back_keyboard(), parse_mode=ParseMode.MARKDOWN)
+
+async def cmd_pronostico(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    pick = await get_active_free_pick()
+    text = format_active_pick(pick)
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🤖 Pedir Pronóstico de Otro Partido", callback_data="btn_ask_ai")],
+        [InlineKeyboardButton(f"⭐ Entrar al Canal VIP ({PRICE_EUR})", url=PAYMENT_URL)],
+        [InlineKeyboardButton("🏠 Menú Principal", callback_data="menu_home")]
+    ])
+    await update.message.reply_text(text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+
+async def cmd_historial(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    picks = await get_recent_picks(limit=6)
+    text = format_recent_history(picks)
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"⭐ Unirme a la Racha del VIP ({PRICE_EUR})", url=PAYMENT_URL)],
+        [InlineKeyboardButton("🏠 Menú Principal", callback_data="menu_home")]
+    ])
+    await update.message.reply_text(text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
 
 async def cmd_pregunta(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -147,12 +169,12 @@ async def cmd_pregunta(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not is_vip and used >= FREE_ANALYSIS_LIMIT:
         text = (
-            "🔒 *Has alcanzado el límite de tu prueba gratuita (2/2 análisis).*\n\n"
-            "Esperamos que los informes de Valor Esperado (+EV) hayan demostrado la potencia de nuestro método.\n\n"
-            "Para continuar recibiendo análisis ilimitados de cualquier evento y acceder a todos los pronósticos diarios, "
-            "entra en nuestro Club VIP:\n\n"
-            f"💳 *Acceso VIP:* `{PRICE_EUR}`\n"
-            "Sin permanencia obligatoria. Cancela en cualquier instante."
+            "🔒 *Has alcanzado el límite de tu prueba gratuita (2/2 pronósticos).*\\n\\n"
+            "Esperamos que la precisión de nuestros análisis te haya demostrado la fuerza del método.\\n\\n"
+            "Para continuar recibiendo pronósticos diarios ilimitados y alertas antes de que bajen las cuotas, "
+            "entra en nuestro Club VIP:\\n\\n"
+            f"💳 *Acceso VIP:* `{PRICE_EUR}`\\n"
+            "Sin permanencia obligatoria. Cancela cuando quieras."
         )
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton(f"⭐ Entrar al Canal VIP ({PRICE_EUR})", url=PAYMENT_URL)],
@@ -162,15 +184,16 @@ async def cmd_pregunta(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     context.user_data["waiting_for_question"] = True
-    remaining = "Ilimitadas (VIP)" if is_vip else f"{FREE_ANALYSIS_LIMIT - used} disponibles"
+    remaining = "Ilimitados (VIP)" if is_vip else f"{FREE_ANALYSIS_LIMIT - used} disponibles"
     text = (
-        "🤖 *Analista Deportivo IA — Consulta Activa*\n"
+        "🤖 *Generador de Pronósticos de Fútbol con IA*\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📊 Análisis de prueba: *{remaining}*\n\n"
-        "Indica qué partido, cuota o mercado deseas que analice la IA:\n"
-        "• Ejemplo: *'¿Tiene valor apostar a victoria del Arsenal a cuota 1.85?'*\n"
-        "• Ejemplo: *'Análisis del partido Barcelona vs Nápoles en Champions'*\n\n"
-        "✍️ *Escribe tu pregunta directamente a continuación:* 👇"
+        f"📊 Consultas de prueba: *{remaining}*\n\n"
+        "Escribe qué partido o liga quieres que analice la IA:\n"
+        "• *'Dame un pronóstico para el partido de España de hoy'*\n"
+        "• *'¿Qué pronóstico ves claro en Champions League esta semana?'*\n"
+        "• *'Analízame el Real Madrid vs Real Sociedad con cuota y stake'*\n\n"
+        "✍️ *Escribe tu petición aquí abajo:* 👇"
     )
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("❌ Cancelar y Volver", callback_data="menu_home")]
@@ -193,28 +216,102 @@ async def cmd_privacidad(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     stats = await get_stats()
     text = (
-        "📊 *Estadísticas del Embudo VIP:*\n\n"
+        "📊 *Estadísticas del Club VIP:*\n\n"
         f"• Usuarios registrados en el bot: `{stats['total_users']}`\n"
-        f"• Análisis generados por IA: `{stats['total_analyses']}`\n"
+        f"• Pronósticos generados por IA: `{stats['total_analyses']}`\n"
+        f"• Total pronósticos auditados: `{stats['total_picks']}`\n"
+        f"• Aciertos verificados: `{stats['won_picks']} ({stats['win_rate']}%)`\n"
         f"• Suscriptores VIP activos: `{stats['total_vip']}`"
     )
     await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
+# ── Comandos de Gestión y Activación de Ventas ────────────────────────────────
+
+async def cmd_marcar_verde(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    DISPARADOR DE VENTAS AUTOMATIZADO:
+    Marca el pronóstico activo como ACERTADO y envía automáticamente
+    el mensaje de celebración y venta a TODOS los usuarios del bot.
+    """
+    pick = await get_active_free_pick()
+    if not pick:
+        await update.message.reply_text("❌ No hay pronóstico activo para marcar.")
+        return
+
+    # Marcar como acertado
+    updated = await mark_pick_result(pick["id"], "ACERTADO")
+
+    celebration_msg = (
+        "🟢 *¡BOOOOOOM! ¡OTRO VERDE MÁS EN EL GRATUITO!* 🟢\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"⚽ *Partido:* *{updated.get('match_title')}*\n"
+        f"🎯 *Selección:* `{updated.get('selection')}`\n"
+        f"📈 *Cuota Ganadora:* `{updated.get('odds')}` ✅ ACERTADA\n\n"
+        "¿Has visto la efectividad de nuestros modelos con Inteligencia Artificial?\n"
+        "En el Canal VIP enviamos entre 2 y 4 selecciones como esta todos los días con análisis completo.\n\n"
+        f"👇 *¡Aprovecha la racha y únete hoy al Canal VIP por {PRICE_EUR}!*"
+    )
+
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"⭐ Entrar al Canal VIP ({PRICE_EUR})", url=PAYMENT_URL)]
+    ])
+
+    all_users = await get_all_user_ids()
+    await update.message.reply_text(f"🚀 ¡Marcado como VERDE! Notificando a {len(all_users)} usuarios para activar ventas...")
+
+    sent = 0
+    for uid in all_users:
+        try:
+            await context.bot.send_message(chat_id=uid, text=celebration_msg, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+            sent += 1
+            await asyncio.sleep(0.05)
+        except Exception:
+            pass
+    await update.message.reply_text(f"✅ Campaña de ventas enviada: {sent}/{len(all_users)} usuarios notificados con éxito.")
+
+async def cmd_nuevo_pick(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Permite publicar un nuevo pronóstico en 1 segundo:
+    Uso: /nuevo_pick Partido | Competicion | Momento | Seleccion | Cuota | Stake | Analisis
+    """
+    raw = update.message.text.replace("/nuevo_pick", "").strip()
+    parts = [p.strip() for p in raw.split("|")]
+    if len(parts) < 7:
+        await update.message.reply_text(
+            "Uso:\n`/nuevo_pick Partido | Competición | Momento | Selección | Cuota | Stake | Análisis`\n\n"
+            "Ejemplo:\n`/nuevo_pick Real Madrid vs Betis | La Liga | Hoy 21:00 | Gana Real Madrid | 1.75 | 1.5 | Ofensiva superior y xG de 2.3.`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+    try:
+        p_id = await add_new_pick(
+            match_title=parts[0],
+            competition=parts[1],
+            match_date=parts[2],
+            selection=parts[3],
+            odds=float(parts[4]),
+            stake=float(parts[5]),
+            analysis=parts[6]
+        )
+        await update.message.reply_text(f"✅ ¡Nuevo pronóstico oficial #{p_id} registrado como ACTIVO del día!")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error al guardar pronóstico: {e}")
+
 async def cmd_difusion(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Permite al tipster enviar difusiones masivas (promociones, resumen de verdes) a todos."""
+    """Permite al tipster enviar difusiones masivas (promociones, audios, avisos) a todos."""
     msg = update.message.text.replace("/difusion", "").strip()
     if not msg:
         await update.message.reply_text("Uso: `/difusion Tu mensaje promocional aquí`", parse_mode=ParseMode.MARKDOWN)
         return
 
     all_users = await get_all_user_ids()
-    await update.message.reply_text(f"📢 Enviando difusión a {len(all_users)} usuarios del bot...")
+    await update.message.reply_text(f"📢 Enviando difusión a {len(all_users)} usuarios...")
     sent = 0
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"⭐ Entrar al VIP ({PRICE_EUR})", url=PAYMENT_URL)]
+    ])
     for uid in all_users:
         try:
-            kb = InlineKeyboardMarkup([
-                [InlineKeyboardButton(f"⭐ Entrar al VIP ({PRICE_EUR})", url=PAYMENT_URL)]
-            ])
             await context.bot.send_message(chat_id=uid, text=msg, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
             sent += 1
             await asyncio.sleep(0.05)
@@ -238,20 +335,32 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await query.edit_message_text(text, reply_markup=get_main_keyboard(), parse_mode=ParseMode.MARKDOWN)
 
-    elif data == "view_daily_tip":
+    elif data == "view_daily_pick":
         context.user_data["waiting_for_question"] = False
+        pick = await get_active_free_pick()
+        text = format_active_pick(pick)
         kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🤖 Consultar al Experto sobre esto", callback_data="btn_ask_ai")],
+            [InlineKeyboardButton("🤖 Pedir Pronóstico de Otro Partido", callback_data="btn_ask_ai")],
             [InlineKeyboardButton(f"⭐ Entrar al Canal VIP ({PRICE_EUR})", url=PAYMENT_URL)],
             [InlineKeyboardButton("🏠 Menú Principal", callback_data="menu_home")]
         ])
-        await query.edit_message_text(DAILY_TIP_TEXT, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+        await query.edit_message_text(text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+
+    elif data == "view_history":
+        context.user_data["waiting_for_question"] = False
+        picks = await get_recent_picks(limit=6)
+        text = format_recent_history(picks)
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"⭐ Unirme a la Racha del VIP ({PRICE_EUR})", url=PAYMENT_URL)],
+            [InlineKeyboardButton("🏠 Menú Principal", callback_data="menu_home")]
+        ])
+        await query.edit_message_text(text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
 
     elif data == "view_bankroll":
         context.user_data["waiting_for_question"] = False
         kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🤖 Preguntar Dudas a la IA", callback_data="btn_ask_ai")],
-            [InlineKeyboardButton("🎁 Ver Análisis del Día", callback_data="view_daily_tip")],
+            [InlineKeyboardButton("🤖 Preguntar a la IA", callback_data="btn_ask_ai")],
+            [InlineKeyboardButton("⚽ Ver Pronóstico del Día", callback_data="view_daily_pick")],
             [InlineKeyboardButton("🏠 Menú Principal", callback_data="menu_home")]
         ])
         await query.edit_message_text(BANKROLL_GUIDE_TEXT, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
@@ -264,9 +373,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if not is_vip and used >= FREE_ANALYSIS_LIMIT:
             text = (
-                "🔒 *Has utilizado tus 2 análisis de prueba gratuita.*\n\n"
-                "Para seguir recibiendo informes de Valor Esperado (+EV), recomendaciones de stake "
-                "y todos los pronósticos verificados, entra al Canal VIP:\n\n"
+                "🔒 *Has utilizado tus 2 pronósticos gratuitos de prueba.*\n\n"
+                "Para seguir recibiendo selecciones de alto valor (+EV), recomendaciones de stake "
+                "y todos los pronósticos diarios verificados, entra al Canal VIP:\n\n"
                 f"💳 *Tarifa Oficial:* `{PRICE_EUR}`\n"
                 "Acceso inmediato. Cancela cuando quieras."
             )
@@ -278,16 +387,15 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         context.user_data["waiting_for_question"] = True
-        remaining = "Ilimitadas (VIP)" if is_vip else f"{FREE_ANALYSIS_LIMIT - used} de {FREE_ANALYSIS_LIMIT}"
+        remaining = "Ilimitados (VIP)" if is_vip else f"{FREE_ANALYSIS_LIMIT - used} de {FREE_ANALYSIS_LIMIT}"
         text = (
-            "🤖 *Consultoría de Pronósticos con IA*\n"
+            "🤖 *Consultor de Pronósticos con IA*\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"📊 Análisis disponibles: *{remaining}*\n\n"
-            "Pregúntale a la IA sobre cualquier partido, cuota o mercado:\n"
-            "• ¿Tiene valor la cuota de X equipo?\n"
-            "• Tendencia de goles o puntos para hoy.\n"
-            "• Stake recomendado según el riesgo.\n\n"
-            "✍️ *Por favor, escribe tu consulta ahora:* 👇"
+            f"📊 Pronósticos disponibles: *{remaining}*\n\n"
+            "Escribe qué partido o liga deseas consultar:\n"
+            "• ¿Qué pronóstico ves claro en fútbol hoy?\n"
+            "• Pronóstico exacto para el partido X.\n\n"
+            "✍️ *Por favor, escribe tu petición ahora:* 👇"
         )
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("❌ Cancelar", callback_data="menu_home")]
@@ -349,8 +457,8 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 [InlineKeyboardButton("🏠 Menú Principal", callback_data="menu_home")]
             ])
             await update.message.reply_text(
-                "🔒 *Has agotado tus 2 análisis gratuitos.*\n"
-                "Para recibir pronósticos diarios y análisis ilimitados entra al VIP:",
+                "🔒 *Has agotado tus 2 pronósticos gratuitos de prueba.*\n"
+                "Para recibir todas las selecciones diarias y alertas en directo entra al VIP:",
                 reply_markup=kb,
                 parse_mode=ParseMode.MARKDOWN
             )
@@ -362,12 +470,12 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         context.user_data["waiting_for_question"] = False
 
         if not is_vip:
-            header = f"📊 *[Informe de Valor IA {new_count} de {FREE_ANALYSIS_LIMIT}]*\n\n"
+            header = f"📊 *[Pronóstico IA de Prueba {new_count} de {FREE_ANALYSIS_LIMIT}]*\n\n"
             if new_count >= FREE_ANALYSIS_LIMIT:
                 footer = (
                     "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                    "🎉 *Has completado tus 2 análisis de prueba gratuita.*\n"
-                    "¿Deseas recibir todas las selecciones verificadas del día en el Canal VIP?"
+                    "🎉 *Has completado tus 2 pronósticos de prueba gratuita.*\n"
+                    "¿Deseas recibir entre 2 y 4 selecciones verificadas diarias en el Canal VIP?"
                 )
                 kb = InlineKeyboardMarkup([
                     [InlineKeyboardButton(f"⭐ Entrar al Canal VIP ({PRICE_EUR})", url=PAYMENT_URL)],
@@ -376,18 +484,18 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             else:
                 footer = (
                     "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                    f"💡 *Te queda 1 análisis gratuito de prueba.*"
+                    f"💡 *Te queda 1 pronóstico gratuito de prueba.*"
                 )
                 kb = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🤖 Realizar mi 2º Análisis", callback_data="btn_ask_ai")],
+                    [InlineKeyboardButton("🤖 Realizar mi 2º Pronóstico", callback_data="btn_ask_ai")],
                     [InlineKeyboardButton(f"⭐ Ver Canal VIP ({PRICE_EUR})", url=PAYMENT_URL)],
                     [InlineKeyboardButton("🏠 Menú Principal", callback_data="menu_home")]
                 ])
         else:
-            header = "⭐ *[Análisis VIP Ilimitado]*\n\n"
+            header = "⭐ *[Pronóstico VIP Ilimitado]*\n\n"
             footer = ""
             kb = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🤖 Otro Análisis", callback_data="btn_ask_ai")],
+                [InlineKeyboardButton("🤖 Otro Pronóstico", callback_data="btn_ask_ai")],
                 [InlineKeyboardButton("🏠 Menú Principal", callback_data="menu_home")]
             ])
 
@@ -396,12 +504,12 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     suggest_kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎁 Ver Análisis de Regalo", callback_data="view_daily_tip")],
-        [InlineKeyboardButton("🤖 Pedir Análisis IA", callback_data="btn_ask_ai")],
+        [InlineKeyboardButton("⚽ Ver Pronóstico del Día", callback_data="view_daily_pick")],
+        [InlineKeyboardButton("🤖 Pedir Pronóstico a la IA", callback_data="btn_ask_ai")],
         [InlineKeyboardButton("🏠 Ver Menú Completo", callback_data="menu_home")]
     ])
     await update.message.reply_text(
-        "👋 ¡Hola! Si deseas consultar un pronóstico o ver el análisis del día, pulsa una opción:",
+        "👋 ¡Hola! Si deseas ver el pronóstico oficial de hoy o pedirle uno a la IA, pulsa una opción:",
         reply_markup=suggest_kb
     )
 
@@ -410,25 +518,26 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def setup_commands(app: Application):
     commands = [
         BotCommand("start", "🚀 Menú principal del Club VIP"),
-        BotCommand("regalo", "🎁 Análisis del Día gratuito"),
-        BotCommand("analisis", "🤖 Pedir Análisis al Experto IA"),
+        BotCommand("pronostico", "⚽ Pronóstico del Día oficial"),
+        BotCommand("historial", "📜 Historial de aciertos verificados"),
+        BotCommand("ia", "🤖 Pedir pronóstico con IA"),
         BotCommand("vip", f"⭐ Acceso VIP ({PRICE_EUR})"),
         BotCommand("terminos", "⚖️ Términos y Condiciones"),
         BotCommand("privacidad", "🔒 Política de Privacidad RGPD"),
-        BotCommand("soporte", "💬 Atención y dudas"),
+        BotCommand("soporte", "💬 Atención y soporte"),
     ]
     await app.bot.set_my_commands(commands)
     try:
         await app.bot.set_my_description(
-            "Comunidad Privada y Análisis Estadístico de Pronósticos Deportivos con IA. "
-            "Detección de Valor Esperado (+EV), gestión de bankroll y pronósticos diarios verificados."
+            "Pronósticos Deportivos y Análisis Estadístico de Fútbol con IA. "
+            "Detección de Valor Esperado (+EV), gestión de bankroll y acceso directo al Canal VIP."
         )
         await app.bot.set_my_short_description(
-            "Pronósticos Deportivos con IA & Acceso al Canal VIP."
+            "Pronósticos de Fútbol con IA & Canal VIP."
         )
     except Exception as e:
         logger.warning(f"No se pudo actualizar descripción: {e}")
-    logger.info("✅ Comandos y descripciones de Tipster VIP registrados en Telegram")
+    logger.info("✅ Comandos y descripciones registrados en Telegram")
 
 # ── Inicialización y Main ───────────────────────────────────────────────────
 
@@ -437,15 +546,16 @@ def build_app() -> Application:
 
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
-    app.add_handler(CommandHandler("regalo", lambda u, c: u.message.reply_text(DAILY_TIP_TEXT, reply_markup=InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"⭐ Entrar al VIP ({PRICE_EUR})", url=PAYMENT_URL)]
-    ]), parse_mode=ParseMode.MARKDOWN)))
-    app.add_handler(CommandHandler("analisis", cmd_pregunta))
+    app.add_handler(CommandHandler("pronostico", cmd_pronostico))
+    app.add_handler(CommandHandler("historial", cmd_historial))
+    app.add_handler(CommandHandler("ia", cmd_pregunta))
     app.add_handler(CommandHandler("vip", cmd_vip))
     app.add_handler(CommandHandler("terminos", cmd_terminos))
     app.add_handler(CommandHandler("privacidad", cmd_privacidad))
     app.add_handler(CommandHandler("soporte", lambda u, c: u.message.reply_text(f"Soporte oficial VIP: {SUPPORT_USER}", reply_markup=get_back_keyboard())))
     app.add_handler(CommandHandler("stats", cmd_stats))
+    app.add_handler(CommandHandler("marcar_verde", cmd_marcar_verde))
+    app.add_handler(CommandHandler("nuevo_pick", cmd_nuevo_pick))
     app.add_handler(CommandHandler("difusion", cmd_difusion))
 
     app.add_handler(CallbackQueryHandler(callback_handler))
@@ -456,7 +566,7 @@ def build_app() -> Application:
 async def main():
     logger.info(f"🚀 Iniciando {BOT_NAME}...")
     await init_db()
-    logger.info("✅ Base de datos SQLite lista")
+    logger.info("✅ Base de datos SQLite lista con pronósticos reales")
 
     try:
         await start_health_server()

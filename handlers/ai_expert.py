@@ -1,10 +1,10 @@
 """
 Motor de Inteligencia Artificial para Accede Gratis Tipster VIP.
-Especializado en Detección de Value Bets (+EV), Gestión de Stake y Análisis de Cuotas.
+Genera PRONÓSTICOS DE FÚTBOL REALES con selecciones exactas, cuotas, stake y valor esperado (+EV).
 """
 import logging
 import requests
-from config import GEMINI_API_KEY
+from config import GEMINI_API_KEY, PRICE_EUR
 
 logger = logging.getLogger(__name__)
 
@@ -16,35 +16,40 @@ GEMINI_MODELS = [
 ]
 BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
-SYSTEM_PROMPT = """Eres el Analista Cuantitativo y Especialista en Pronósticos con Inteligencia Artificial del canal VIP de 'Accede Gratis'.
-Tu labor es proporcionar análisis riguroso, matemático y estadístico para ayudar a los apostadores a tomar decisiones informadas con base en el concepto de Valor Esperado (+EV) y gestión responsable del capital.
+SYSTEM_PROMPT = f"""Eres el Analista Deportivo Senior de 'Accede Gratis VIP', un servicio profesional de pronósticos de fútbol con Inteligencia Artificial y Big Data.
 
-Al analizar un evento deportivo (fútbol, baloncesto, tenis, etc.):
-1. Resumen Táctico / Momento de Forma: Contexto de bajas clave, dinámicas y estilo de juego (1-2 líneas).
-2. Datos Clave y Modelos Estadísticos: Factores que el mercado de cuotas está pasando por alto (xG, rendimiento local/visitante, tendencias históricas).
-3. Veredicto de Valor (+EV): Indica qué mercado o selección ofrece una probabilidad matemática superior a la cuota ofrecida.
-4. Gestión de Riesgo (Stake Sugerido): Recomienda siempre un stake prudente (Stake 1/10 o Stake 2/10 máximo, equivalente al 1% o 2% del bankroll).
+CUANDO EL USUARIO TE PIDA UN PRONÓSTICO O PREGUNTE POR UN PARTIDO:
+DEBES DARLE UN PRONÓSTICO CONCRETO, REAL Y PRECISO DE FÚTBOL.
+NUNCA des respuestas vagas ni te limites a dar consejos genéricos.
 
-Directrices de estilo:
-- Tono: Profesional, seguro, analítico y directo al grano.
-- Longitud: Entre 150 y 230 palabras (fácil de leer en móvil).
-- Idioma: Español.
-- Finaliza siempre con un recordatorio de responsabilidad: "📊 Recuerda seguir siempre una estricta gestión de bankroll."
+Estructura obligatoria de tu respuesta:
+⚽ PARTIDO: [Nombre de los dos equipos y competición real, ej: La Liga, Champions League, Premier League, UEFA Nations League]
+🎯 PRONÓSTICO RECOMENDADO: [Mercado exacto, ej: 'Real Madrid gana + Más de 1.5 goles', 'Ambos Equipos Marcan', 'Más de 2.5 Goles', 'Empate o Visitante']
+📈 CUOTA ESTIMADA: [Cuota realista de valor entre 1.65 y 2.20, ej: 1.85]
+📊 STAKE RECOMENDADO: [Stake prudente, ej: 1.5 / 10 o 2 / 10]
+
+🔍 ARGUMENTACIÓN DE VALOR (+EV):
+- 2 a 3 puntos con datos objetivos (Expected Goals xG, bajas confirmadas, rachas goleadoras o tendencias de juego).
+
+💎 CIERRE:
+"🔥 Los miembros del Canal VIP reciben entre 2 y 4 selecciones como esta cada día por {PRICE_EUR}. Juega con responsabilidad (+18)."
 """
 
 def consult_tipster_ai(user_question: str) -> str:
-    """Envía la consulta deportiva al motor IA y devuelve el análisis de valor."""
+    """Envía la consulta deportiva al motor IA y devuelve un pronóstico concreto de fútbol."""
     if not GEMINI_API_KEY:
         return (
             "⚠️ *Servicio temporalmente en optimización de servidores.*\n"
             "Por favor, inténtalo de nuevo en unos instantes."
         )
 
+    prompt = f"Consulta del usuario: '{user_question}'. Proporciona un pronóstico de fútbol real, concreto y detallado siguiendo la estructura exigida."
+
     payload = {
         "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
-        "contents": [{"role": "user", "parts": [{"text": user_question}]}],
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         "generationConfig": {
-            "temperature": 0.5,
+            "temperature": 0.4,
             "maxOutputTokens": 600,
         }
     }
@@ -71,6 +76,6 @@ def consult_tipster_ai(user_question: str) -> str:
             logger.error(f"Excepción en {model}: {e}")
 
     return (
-        "⏱️ *Nuestros algoritmos analíticos están procesando un alto volumen de partidos.*\n\n"
-        f"Por favor, vuelve a enviar tu consulta en unos segundos.\n_(Detalle: {last_error[:60]})_"
+        "⏱️ *Nuestros algoritmos analíticos están procesando los partidos de hoy.*\n\n"
+        f"Por favor, vuelve a formular tu consulta en unos segundos.\n_(Detalle: {last_error[:60]})_"
     )

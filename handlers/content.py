@@ -1,21 +1,53 @@
 """
-Contenidos de conversión, guías y textos normativos para Accede Gratis Tipster VIP.
+Contenidos de conversión, guías y formateadores de pronósticos reales para Accede Gratis Tipster VIP.
 """
 from config import PRICE_EUR, SUPPORT_USER, PAYMENT_URL
 
-DAILY_TIP_TEXT = (
-    "🎁 *ANÁLISIS ESTADÍSTICO DE REGALO (PARTIDO DEL DÍA)*\n"
-    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-    "⚽ *Fútbol Europeo: Análisis Cuantitativo de Valor*\n\n"
-    "📌 *Lectura Táctica y Tendencias Clave:*\n"
-    "• *Generación de Ocasiones (xG):* El equipo local promedia 2.15 goles esperados por encuentro en su estadio, mientras que el rival concede un 40% más de disparos entre los tres palos como visitante.\n"
-    "• *Bajas e Impacto:* La ausencia del mediocentro defensivo titular en el equipo visitante abre espacios críticos entre líneas.\n"
-    "• *Desajuste de Cuota:* El mercado paga por encima de 1.80 una probabilidad que nuestros modelos sitúan en torno al 65% (+EV claro).\n\n"
-    "🎯 *Mercado con Valor Detectado:* `Más de 2.0 Goles / Más de 1.5 Goles Local`\n"
-    "📊 *Stake Sugerido:* `1.5 / 10` (Gestión prudente)\n\n"
-    "💡 *En el Canal VIP enviamos entre 2 y 4 análisis diarios seleccionados con este mismo rigor analítico.*\n\n"
-    "👉 *¿Quieres analizar un partido específico?* Pulsa el botón inferior para consultarle a nuestra IA."
-)
+def format_active_pick(pick: dict) -> str:
+    if not pick:
+        return (
+            "⏳ *Preparando el pronóstico del día...*\n\n"
+            "Nuestros analistas y la IA están terminando de procesar las alineaciones de hoy. "
+            "Vuelve a consultar en unos minutos o pulsa el botón para preguntar directamente a la IA."
+        )
+    status = pick.get("status", "PENDIENTE")
+    status_label = "⏳ PENDIENTE (En juego o por disputarse)" if status == "PENDIENTE" else ("🟢 ACERTADO / VERDE ✅" if status == "ACERTADO" else "🔴 NO ACERTADO")
+    return (
+        f"⚽ *PRONÓSTICO OFICIAL GRATUITO DEL DÍA*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"🏆 *Competición:* {pick.get('competition', 'Fútbol')}\n"
+        f"⚔️ *Partido:* *{pick.get('match_title')}*\n"
+        f"📅 *Momento:* {pick.get('match_date')}\n\n"
+        f"🎯 *Selección:* `{pick.get('selection')}`\n"
+        f"📈 *Cuota:* `{pick.get('odds', 1.85)}`\n"
+        f"📊 *Stake:* `{pick.get('stake', 1.5)} / 10`\n"
+        f"🚦 *Estado:* *{status_label}*\n\n"
+        f"🔍 *Análisis Táctico / Estadístico:*\n"
+        f"{pick.get('analysis')}\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"💎 *¿Quieres entre 2 y 4 pronósticos diarios analizados con este método?*\n"
+        f"Entra hoy al Canal VIP por {PRICE_EUR} y no te quedes fuera."
+    )
+
+def format_recent_history(picks: list[dict]) -> str:
+    lines = [
+        "📜 *HISTORIAL VERIFICADO DE PRONÓSTICOS*",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n",
+        "Resultados oficiales con total transparencia:\n"
+    ]
+    for p in picks:
+        icon = "🟢" if p.get("status") == "ACERTADO" else ("⏳" if p.get("status") == "PENDIENTE" else "🔴")
+        lines.append(
+            f"{icon} *{p.get('match_title')}* ({p.get('competition')})\n"
+            f"   ↳ Selección: `{p.get('selection')}` @ cuota `{p.get('odds')}`\n"
+            f"   ↳ Resultado: *{p.get('status')}*\n"
+        )
+    lines.append(
+        f"\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🔥 *Súmate a la racha ganadora del Canal VIP.*\n"
+        f"Suscripción completa por {PRICE_EUR}."
+    )
+    return "\n".join(lines)
 
 BANKROLL_GUIDE_TEXT = (
     "📚 *GUÍA MAESTRA: Cómo Gestionar tu Bankroll como un Profesional*\n"
