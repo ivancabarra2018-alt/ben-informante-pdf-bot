@@ -68,7 +68,26 @@ def get_back_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🏠 Menú Principal", callback_data="menu_home")]
     ])
 
-# ── Servidor de Salud para Render ────────────────────────────────────────────
+# ── Servidor de Salud y Anti-Hibernación para Render ─────────────────────────
+
+async def keep_alive_pinger():
+    """Envía un ping periódico para evitar que el plan gratuito de Render hiberne el bot."""
+    import urllib.request
+    urls = [
+        "https://ben-informante-pdf-bot.onrender.com/health",
+        "https://qr-iformaciones-bot.onrender.com/health"
+    ]
+    await asyncio.sleep(45)
+    while True:
+        for url in urls:
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (AntiSleep/1.0)"})
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    pass
+            except Exception as e:
+                logger.debug(f"KeepAlive ping error: {e}")
+        await asyncio.sleep(480)  # Ping cada 8 minutos (el límite de inactividad de Render es 15 min)
+
 
 async def start_health_server():
     """Permite a Render verificar que el servicio web está activo."""
@@ -84,6 +103,9 @@ async def start_health_server():
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
     logger.info(f"🌐 Health server corriendo en puerto {port}")
+    # Arrancar tarea en segundo plano que mantiene el contenedor siempre despierto
+    asyncio.create_task(keep_alive_pinger())
+
 
 # ── Comandos Principales ─────────────────────────────────────────────────────
 
