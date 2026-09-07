@@ -1,7 +1,8 @@
 """
-🤖 Accede Gratis | Pronósticos Deportivos & IA VIP (@Accedogratis_bot)
-Bot tipster profesional con pronóstico diario real, sistema de conversión a VIP,
-verificación de justificantes de pago con IA (Gemini Vision) y panel secreto /admintg.
+🤖 Accede Gratis | Pronósticos Deportivos & IA (@Accedogratis_bot)
+Bot tipster profesional con pronóstico real de fútbol, panel secreto /admintg,
+verificación de justificantes de pago con IA (Gemini Vision), reseteo de acceso (7.99€)
+y sistema de compensación si se falla el pronóstico.
 """
 import os
 import sys
@@ -15,7 +16,7 @@ from telegram.ext import (
 )
 from telegram.constants import ParseMode
 
-# Asegurar path
+# Path
 sys.path.insert(0, os.path.dirname(__file__))
 
 from config import (
@@ -25,12 +26,15 @@ from config import (
 from database import (
     init_db, upsert_user, get_user, is_admin_user, get_admin_user_ids,
     get_all_users, get_all_user_ids, get_payment_url, set_payment_url,
-    get_free_pick, get_vip_next_pick, mark_free_pick_won,
-    set_new_free_pick, set_new_vip_pick, add_receipt,
-    get_pending_receipts, update_receipt_status, get_admin_stats
+    get_free_pick, get_next_paid_pick, mark_free_pick_won,
+    mark_pick_lost_and_compensate_all, mark_user_viewed_free_pick,
+    mark_user_viewed_paid_pick, set_new_free_pick, set_new_paid_pick,
+    add_receipt, get_pending_receipts, approve_receipt_and_reset_user,
+    reject_receipt, get_admin_stats
 )
 from handlers.content import (
-    format_daily_pick, format_vip_pick, format_green_celebration,
+    format_daily_pick, format_paid_pick, format_exhausted_free_pick,
+    format_green_celebration, format_red_compensation,
     format_receipt_instructions, TERMS_TEXT
 )
 from handlers.receipt_checker import verify_receipt_with_ai
@@ -51,32 +55,35 @@ async def get_user_main_keyboard(user_id: int) -> InlineKeyboardMarkup:
     user = await get_user(user_id)
     pay_url = await get_payment_url()
 
+    # Si tiene acceso activo pagado
     if user.get("has_paid_access") == 1:
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton("👑 Ver Siguiente Apuesta VIP", callback_data="view_pick")],
-            [InlineKeyboardButton("💬 Soporte VIP", url=SUPPORT_URL)]
+            [InlineKeyboardButton("👑 Ver Siguiente Pronóstico", callback_data="view_pick")],
+            [InlineKeyboardButton("💬 Soporte Oficial", url=SUPPORT_URL)]
         ])
 
+    # Si ya consumió su pronóstico gratuito y no ha pagado
+    if user.get("has_seen_free_pick") == 1:
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"💳 Desbloquear Siguiente ({PRICE_EUR})", url=pay_url)],
+            [InlineKeyboardButton("🧾 Enviar Justificante de Pago", callback_data="btn_send_receipt")],
+            [InlineKeyboardButton("💬 Soporte Oficial", url=SUPPORT_URL)]
+        ])
+
+    # Usuario nuevo (aún no ha visto su pronóstico gratis)
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("⚽ Ver Pronóstico Real de Hoy (Gratis)", callback_data="view_pick")],
-        [InlineKeyboardButton(f"💳 Pagar Siguiente Apuesta ({PRICE_EUR})", url=pay_url)],
-        [InlineKeyboardButton("🧾 Enviar Justificante de Pago", callback_data="btn_send_receipt")],
+        [InlineKeyboardButton("⚽ Ver Pronóstico Gratuito de Hoy", callback_data="view_pick")],
+        [InlineKeyboardButton(f"💳 Siguiente Pronóstico ({PRICE_EUR})", url=pay_url)],
+        [InlineKeyboardButton("🧾 Ya pagué (Enviar Justificante)", callback_data="btn_send_receipt")],
         [InlineKeyboardButton("💬 Soporte Oficial", url=SUPPORT_URL)]
     ])
 
 async def get_pick_keyboard(user_id: int) -> InlineKeyboardMarkup:
-    user = await get_user(user_id)
     pay_url = await get_payment_url()
-
-    if user.get("has_paid_access") == 1:
-        return InlineKeyboardMarkup([
-            [InlineKeyboardButton("🏠 Volver al Inicio", callback_data="menu_home")]
-        ])
-
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"💳 Pagar Siguiente Apuesta ({PRICE_EUR})", url=pay_url)],
-        [InlineKeyboardButton("🧾 Enviar Justificante de Pago", callback_data="btn_send_receipt")],
-        [InlineKeyboardButton("🏠 Volver al Inicio", callback_data="menu_home")]
+        [InlineKeyboardButton(f"💳 Adquirir Siguiente ({PRICE_EUR})", url=pay_url)],
+        [InlineKeyboardButton("🧾 Enviar Justificante", callback_data="btn_send_receipt")],
+        [InlineKeyboardButton("🏠 Menú Principal", callback_data="menu_home")]
     ])
 
 # ── Servidor de Salud y Anti-Hibernación para Render 24/7 ────────────────────
@@ -100,9 +107,7 @@ async def keep_alive_pinger():
                 logger.debug(f"KeepAlive error {url}: {e}")
         await asyncio.sleep(480)  # Cada 8 minutos
 
-
 async def start_health_server():
-    """Permite a Render verificar que el servicio web está activo."""
     port = int(os.environ.get("PORT", 8080))
     async def handle_health(_):
         return web.Response(text="OK - Accede Gratis Tipster Bot Operativo ✅")
@@ -117,48 +122,51 @@ async def start_health_server():
     logger.info(f"🌐 Health server corriendo en puerto {port}")
     asyncio.create_task(keep_alive_pinger())
 
-# ── Panel de Administración /admintg ─────────────────────────────────────────
+# ── Panel de Administración Oculto (/admintg) ────────────────────────────────
 
 async def build_admin_panel():
     stats = await get_admin_stats()
     pay_url = await get_payment_url()
     free_pick = await get_free_pick()
-    vip_pick = await get_vip_next_pick()
+    paid_pick = await get_next_paid_pick()
 
     text = (
-        "🛠️ *PANEL DE CONTROL TIPSTER VIP* (`/admintg`)\n"
+        "🛠️ *PANEL DE CONTROL TIPSTER PRO* (`/admintg`)\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         "📊 *Estadísticas de Usuarios:*\n"
-        f"• 👥 Total usuarios que iniciaron el bot: `{stats['total_users']}`\n"
-        f"• 💎 Usuarios con Acceso VIP (Pagados): `{stats['paid_users']}`\n"
+        f"• 👥 Total usuarios registrados: `{stats['total_users']}`\n"
+        f"• 💳 Usuarios con Acceso Activo: `{stats['paid_users']}`\n"
         f"• ⏳ Justificantes pendientes de revisar: `{stats['pending_receipts']}`\n"
-        f"• ✅ Justificantes aprobados: `{stats['approved_receipts']}`\n\n"
-        "🔗 *Enlace de Pago Actual:*\n"
+        f"• ✅ Justificantes aprobados (reseteados): `{stats['approved_receipts']}`\n\n"
+        "🔗 *Enlace de Pago KunfuPay:*\n"
         f"`{pay_url}`\n\n"
-        "⚽ *Partido Gratuito del Día:*\n"
-        f"• {free_pick.get('match_title', 'No definido')} ({free_pick.get('selection', '')})\n"
+        "⚽ *Partido Gratuito Hoy:*\n"
+        f"• {free_pick.get('match_title', 'Sin definir')} ({free_pick.get('selection', '')})\n"
         f"• Estado: *{free_pick.get('status', 'PENDIENTE')}*\n\n"
-        "👑 *Siguiente Apuesta VIP (De Pago):*\n"
-        f"• {vip_pick.get('match_title', 'No definido')} ({vip_pick.get('selection', '')})\n"
+        f"👑 *Siguiente Pronóstico ({PRICE_EUR}):*\n"
+        f"• {paid_pick.get('match_title', 'Sin definir')} ({paid_pick.get('selection', '')})\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "👇 *Gestión Rápida de Administrador:*"
+        "👇 *Acciones de Administrador:*"
     )
 
     keyboard = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🟢 Marcar VERDE y Notificar Ganador", callback_data="admin_confirm_verde")
+            InlineKeyboardButton("🟢 Marcar VERDE (Notificar Ganador)", callback_data="admin_confirm_verde")
+        ],
+        [
+            InlineKeyboardButton("🔴 Marcar ROJO (Resetear Todos Gratis)", callback_data="admin_confirm_rojo")
         ],
         [
             InlineKeyboardButton("📢 Difusión Masiva", callback_data="admin_ask_broadcast"),
-            InlineKeyboardButton("🔗 Modificar Link de Pago", callback_data="admin_change_payurl")
+            InlineKeyboardButton("🔗 Cambiar Link Pago", callback_data="admin_change_payurl")
         ],
         [
-            InlineKeyboardButton(f"🧾 Justificantes Pendientes ({stats['pending_receipts']})", callback_data="admin_list_receipts"),
-            InlineKeyboardButton("📊 Actualizar Panel", callback_data="admin_refresh")
+            InlineKeyboardButton(f"🧾 Justificantes ({stats['pending_receipts']})", callback_data="admin_list_receipts"),
+            InlineKeyboardButton("🔄 Refrescar Panel", callback_data="admin_refresh")
         ],
         [
             InlineKeyboardButton("⚽ Modificar Partido Gratis", callback_data="admin_info_freepick"),
-            InlineKeyboardButton("👑 Modificar Partido VIP", callback_data="admin_info_vippick")
+            InlineKeyboardButton("👑 Modificar Partido Siguiente", callback_data="admin_info_paidpick")
         ]
     ])
     return text, keyboard
@@ -168,7 +176,7 @@ async def cmd_admintg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await upsert_user(user.id, user.username, user.first_name)
 
     if not await is_admin_user(user.id):
-        await update.message.reply_text("⛔ Acceso no autorizado. Este comando es exclusivo del administrador.")
+        await update.message.reply_text("⛔ Comando no disponible.")
         return
 
     text, kb = await build_admin_panel()
@@ -183,19 +191,23 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if user_db.get("has_paid_access") == 1:
         welcome_text = (
-            f"👑 *¡Hola de nuevo, {user.first_name}! Bienvenido a tu zona VIP.*\n\n"
-            "Tienes acceso completo concedido a los pronósticos exclusivos analizados con IA.\n\n"
-            "👇 *Pulsa el botón para ver tu siguiente pronóstico VIP:*"
+            f"👑 *¡Hola de nuevo, {user.first_name}! Acceso Activo.*\n\n"
+            "Tu bot está reseteado con acceso al **Siguiente Pronóstico** con IA.\n\n"
+            "👇 *Pulsa el botón para ver el pronóstico exclusivo:*"
         )
+    elif user_db.get("has_seen_free_pick") == 1:
+        pay_url = await get_payment_url()
+        welcome_text = format_exhausted_free_pick(pay_url)
     else:
         welcome_text = (
             f"👋 *¡Hola, {user.first_name}! Bienvenido a Accede Gratis.*\n\n"
             "⚽ *¿Cómo funciona nuestro sistema?*\n"
-            "Te facilitamos un **único pronóstico de fútbol 100% REAL de hoy**, seleccionado por Inteligencia Artificial y datos de cuota de valor.\n\n"
-            "🎯 *Nuestra política de transparencia:*\n"
-            "• El primer pronóstico es **GRATIS** para que compruebes nuestra efectividad con un partido real.\n"
-            "• **Si sale VERDE y se acierta**, los siguientes pronósticos exclusivos serán de pago por solo 1.99€ al mes.\n"
-            "• Tras pagar, simplemente subes aquí el justificante y el sistema te dará acceso inmediato a la siguiente apuesta.\n\n"
+            "Te facilitamos un **único pronóstico de fútbol 100% REAL de hoy**, analizado con Inteligencia Artificial y datos de cuota de valor.\n\n"
+            "🎯 *Política de transparencia total:*\n"
+            "• El primer pronóstico es **100% GRATIS** para que compruebes nuestra efectividad con un partido real.\n"
+            f"• **Si sale VERDE y se acierta**, el Siguiente Pronóstico exclusivo costará solo **{PRICE_EUR}**.\n"
+            "• Quien pague sube el comprobante aquí, su bot se **resetea** y verá el de mañana / siguiente.\n"
+            "• **Si se falla el pronóstico**, se resetea automáticamente a todos los usuarios para que el siguiente día lo reciban **GRATIS** sin pagar.\n\n"
             "👇 *Pulsa abajo para consultar el partido real de hoy:*"
         )
 
@@ -207,34 +219,51 @@ async def cmd_pronostico(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await upsert_user(user.id, user.username, user.first_name)
     user_db = await get_user(user.id)
 
+    # 1. Si tiene acceso pagado activo
     if user_db.get("has_paid_access") == 1:
-        pick = await get_vip_next_pick()
-        text = format_vip_pick(pick)
-    else:
-        pick = await get_free_pick()
-        text = format_daily_pick(pick)
+        pick = await get_next_paid_pick()
+        text = format_paid_pick(pick)
+        await mark_user_viewed_paid_pick(user.id)
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Menú Principal", callback_data="menu_home")]])
+        await update.message.reply_text(text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+        return
 
+    # 2. Si ya consumió el gratis y no ha pagado
+    if user_db.get("has_seen_free_pick") == 1:
+        pay_url = await get_payment_url()
+        text = format_exhausted_free_pick(pay_url)
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"💳 Pagar Siguiente Pronóstico ({PRICE_EUR})", url=pay_url)],
+            [InlineKeyboardButton("🧾 Enviar Justificante de Pago", callback_data="btn_send_receipt")],
+            [InlineKeyboardButton("🏠 Menú Principal", callback_data="menu_home")]
+        ])
+        await update.message.reply_text(text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+        return
+
+    # 3. Usuario que aún no ha visto su pronóstico gratuito
+    pick = await get_free_pick()
+    text = format_daily_pick(pick)
+    await mark_user_viewed_free_pick(user.id)
     kb = await get_pick_keyboard(user.id)
     await update.message.reply_text(text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
 
-async def cmd_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cmd_siguiente(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pay_url = await get_payment_url()
     text = (
-        "💎 *Suscripción Tipster VIP — Máxima Rentabilidad con IA*\n"
+        f"🎯 *Siguiente Pronóstico de Fútbol con IA ({PRICE_EUR})*\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "Accede a los pronósticos de alto valor (+EV) calculados diariamente con modelos estadísticos avanzados:\n\n"
-        "✅ *Pronósticos exclusivos analizados a fondo*\n"
-        "✅ *Cuotas reales comprobadas en casas oficiales*\n"
-        "✅ *Gestión de Stake profesional (1 al 10)*\n"
-        "✅ *Alertas inmediatas de oportunidades*\n\n"
-        f"💳 *Tarifa Reducida:* `{PRICE_EUR}`\n\n"
-        f"👉 [Haz clic aquí para pagar con KunfuPay]({pay_url})\n"
-        "Luego envía la captura o foto del comprobante en este chat para activarte al instante."
+        "Adquiere el siguiente pronóstico analizado matemáticamente con valor esperado (+EV):\n\n"
+        "✅ *Partido real seleccionado por algoritmos de IA*\n"
+        "✅ *Cuotas reales comprobadas en casas de apuestas*\n"
+        "✅ *Stake recomendado y análisis detallado*\n\n"
+        f"💳 *Precio:* `{PRICE_EUR}` (pago único)\n\n"
+        f"👉 [Haz clic aquí para pagar en KunfuPay]({pay_url})\n\n"
+        "Una vez realizado el pago, envía la captura del justificante en este chat para **resetear tu bot** y acceder de inmediato."
     )
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton(f"💳 Pagar con KunfuPay ({PRICE_EUR})", url=pay_url)],
         [InlineKeyboardButton("🧾 Enviar Justificante de Pago", callback_data="btn_send_receipt")],
-        [InlineKeyboardButton("🏠 Volver al Inicio", callback_data="menu_home")]
+        [InlineKeyboardButton("🏠 Menú Principal", callback_data="menu_home")]
     ])
     await update.message.reply_text(text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
 
@@ -242,17 +271,17 @@ async def cmd_terminos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Volver al Inicio", callback_data="menu_home")]])
     await update.message.reply_text(TERMS_TEXT, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
 
-# ── Activación de VERDE y Difusión Masiva ────────────────────────────────────
+# ── Activación de VERDE / ROJO y Difusión Masiva ────────────────────────────
 
 async def broadcast_green_to_all(bot) -> tuple[int, int]:
-    """Envía la notificación de acierto (VERDE) y link de pago a todos los usuarios."""
+    """Marca VERDE y envía celebración + venta del siguiente a todos los usuarios."""
     free_pick = await mark_free_pick_won()
     all_users = await get_all_user_ids()
     pay_url = await get_payment_url()
 
     celebration_text = format_green_celebration(free_pick, pay_url)
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"💳 Adquirir Siguiente Apuesta ({PRICE_EUR})", url=pay_url)],
+        [InlineKeyboardButton(f"💳 Comprar Siguiente Pronóstico ({PRICE_EUR})", url=pay_url)],
         [InlineKeyboardButton("🧾 Ya pagué, enviar justificante", callback_data="btn_send_receipt")]
     ])
 
@@ -266,15 +295,44 @@ async def broadcast_green_to_all(bot) -> tuple[int, int]:
             pass
     return sent, len(all_users)
 
+async def broadcast_red_to_all(bot) -> tuple[int, int]:
+    """Marca ROJO, resetea a todos los usuarios y avisa de la compensación gratuita."""
+    pick, total_reset = await mark_pick_lost_and_compensate_all()
+    all_users = await get_all_user_ids()
+
+    red_text = format_red_compensation(pick)
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("⚽ Ver Pronóstico Gratuito Mañana", callback_data="view_pick")],
+        [InlineKeyboardButton("💬 Soporte Oficial", url=SUPPORT_URL)]
+    ])
+
+    sent = 0
+    for uid in all_users:
+        try:
+            await bot.send_message(chat_id=uid, text=red_text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+            sent += 1
+            await asyncio.sleep(0.04)
+        except Exception:
+            pass
+    return sent, total_reset
+
 async def cmd_verde(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not await is_admin_user(user.id):
-        await update.message.reply_text("⛔ Solo el administrador puede marcar el partido como VERDE.")
         return
 
-    status_msg = await update.message.reply_text("🚀 Marcando partido gratuito como VERDE y enviando aviso con link de pago a todos los usuarios...")
+    status_msg = await update.message.reply_text("🚀 Marcando partido como VERDE y lanzando difusión a todos los usuarios...")
     sent, total = await broadcast_green_to_all(context.bot)
-    await status_msg.edit_text(f"✅ ¡Difusión de VERDE completada! Notificación enviada con éxito a {sent}/{total} usuarios.")
+    await status_msg.edit_text(f"✅ ¡Difusión de VERDE entregada a {sent}/{total} usuarios con éxito!")
+
+async def cmd_rojo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not await is_admin_user(user.id):
+        return
+
+    status_msg = await update.message.reply_text("🔴 Marcando pronóstico como FALLADO (ROJO), reseteando bot a todos los usuarios y notificando compensación...")
+    sent, total_reset = await broadcast_red_to_all(context.bot)
+    await status_msg.edit_text(f"🛡️ ¡Compensación completada! Se ha reseteado el bot a {total_reset} usuarios y se notificó a {sent} usuarios.")
 
 # ── Gestión de Pronósticos y Link de Pago por Comandos ──────────────────────
 
@@ -302,7 +360,7 @@ async def cmd_nuevo_pick(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "⚽ *Actualizar Pronóstico Gratuito del Día:*\n"
             "Uso:\n`/pick Partido | Competición | Horario | Selección | Cuota | Stake | Análisis`\n\n"
-            "Ejemplo:\n`/pick Getafe CF vs RC Celta | LaLiga EA Sports | Hoy 19:00 | Menos de 2.5 Goles | 1.65 | 1.5 | Partido táctico con baja probabilidad de gol.`",
+            "Ejemplo:\n`/pick Francia vs Italia | UEFA Nations League | Hoy 20:45 | Ambos Equipos Marcan | 1.78 | 2.0 | Partido estelar en París con alta expectativa goleadora.`",
             parse_mode=ParseMode.MARKDOWN
         )
         return
@@ -320,23 +378,23 @@ async def cmd_nuevo_pick(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"❌ Error al registrar partido: {e}")
 
-async def cmd_nuevo_vippick(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cmd_nuevo_paidpick(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not await is_admin_user(user.id):
         return
 
-    raw = update.message.text.replace("/vippick", "").strip()
+    raw = update.message.text.replace("/paidpick", "").replace("/vippick", "").strip()
     parts = [p.strip() for p in raw.split("|")]
     if len(parts) < 7:
         await update.message.reply_text(
-            "👑 *Actualizar Siguiente Apuesta VIP:*\n"
-            "Uso:\n`/vippick Partido | Competición | Horario | Selección | Cuota | Stake | Análisis`\n\n"
-            "Ejemplo:\n`/vippick Real Madrid vs Real Sociedad | LaLiga | Mañana 21:00 | Real Madrid gana + Más de 1.5 | 1.88 | 2.0 | El Madrid promedia 2.3 xG y la Real sufre en transiciones.`",
+            f"👑 *Actualizar Siguiente Pronóstico de Pago ({PRICE_EUR}):*\n"
+            "Uso:\n`/paidpick Partido | Competición | Horario | Selección | Cuota | Stake | Análisis`\n\n"
+            "Ejemplo:\n`/paidpick Suiza vs España | UEFA Nations League | Próxima Jornada 20:45 | España gana o empate + Más 1.5 | 1.82 | 2.5 | La campeona de Europa llega invicta y con alta efectividad.`",
             parse_mode=ParseMode.MARKDOWN
         )
         return
     try:
-        await set_new_vip_pick(
+        await set_new_paid_pick(
             match_title=parts[0],
             competition=parts[1],
             match_time=parts[2],
@@ -345,9 +403,9 @@ async def cmd_nuevo_vippick(update: Update, context: ContextTypes.DEFAULT_TYPE):
             stake=float(parts[5]),
             analysis=parts[6]
         )
-        await update.message.reply_text(f"✅ Siguiente Apuesta VIP guardada con éxito:\n*{parts[0]}* ({parts[3]} @ {parts[4]})", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text(f"✅ Siguiente Pronóstico ({PRICE_EUR}) guardado con éxito:\n*{parts[0]}* ({parts[3]} @ {parts[4]})", parse_mode=ParseMode.MARKDOWN)
     except Exception as e:
-        await update.message.reply_text(f"❌ Error al registrar apuesta VIP: {e}")
+        await update.message.reply_text(f"❌ Error al registrar pronóstico: {e}")
 
 async def cmd_difusion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -362,7 +420,7 @@ async def cmd_difusion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     all_users = await get_all_user_ids()
     pay_url = await get_payment_url()
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"💳 Acceso VIP ({PRICE_EUR})", url=pay_url)],
+        [InlineKeyboardButton(f"💳 Siguiente Pronóstico ({PRICE_EUR})", url=pay_url)],
         [InlineKeyboardButton("💬 Contactar Soporte", url=SUPPORT_URL)]
     ])
 
@@ -390,7 +448,7 @@ async def photo_receipt_handler(update: Update, context: ContextTypes.DEFAULT_TY
 
     status_msg = await update.message.reply_text(
         "🤖 *Procesando justificante de pago con Inteligencia Artificial...*\n"
-        "Leyendo datos de la imagen (importe, fecha, remitente)...",
+        "Verificando comprobante legítimo de pago...",
         parse_mode=ParseMode.MARKDOWN
     )
 
@@ -413,7 +471,7 @@ async def photo_receipt_handler(update: Update, context: ContextTypes.DEFAULT_TY
             f"🧾 *Justificante Recibido con Éxito (Ref: #{receipt_id})*\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             f"🤖 *Diagnóstico Inteligencia Artificial:*\n_{ai_verdict}_\n\n"
-            "⏳ *El administrador ha recibido tu comprobante*. En breves minutos se validará tu acceso y podrás ver la **Siguiente Apuesta VIP**.",
+            "⏳ *El administrador ha recibido tu comprobante*. En breves instantes será validado y **tu bot quedará reseteado** para ver el siguiente pronóstico.",
             parse_mode=ParseMode.MARKDOWN
         )
 
@@ -423,13 +481,13 @@ async def photo_receipt_handler(update: Update, context: ContextTypes.DEFAULT_TY
             f"🔔 *NUEVO JUSTIFICANTE DE PAGO (ID #{receipt_id})*\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             f"👤 *Usuario:* {user.first_name} (@{user.username or 'sin_username'} | ID: `{user.id}`)\n"
-            f"📅 *Recibido:* Ahora\n\n"
+            f"💰 *Producto:* Siguiente Pronóstico ({PRICE_EUR})\n\n"
             f"🤖 *Evaluación de Gemini Vision:*\n{ai_verdict}\n\n"
-            "¿Deseas validar el justificante y concederle acceso a la siguiente apuesta VIP?"
+            "¿Deseas validar el justificante y resetear el bot a este usuario?"
         )
         admin_kb = InlineKeyboardMarkup([
             [
-                InlineKeyboardButton("✅ Aprobar Acceso VIP", callback_data=f"rcpt_approve:{receipt_id}"),
+                InlineKeyboardButton("✅ Aprobar y Resetear Bot", callback_data=f"rcpt_approve:{receipt_id}"),
                 InlineKeyboardButton("❌ Rechazar", callback_data=f"rcpt_reject:{receipt_id}")
             ]
         ])
@@ -449,7 +507,7 @@ async def photo_receipt_handler(update: Update, context: ContextTypes.DEFAULT_TY
     except Exception as e:
         logger.error(f"Error procesando justificante de {user.id}: {e}")
         await status_msg.edit_text(
-            "⚠️ Hubo un problema al leer la imagen. Por favor, asegúrate de enviar una foto nítida o contacta directamente con soporte.",
+            "⚠️ Hubo un problema al procesar la imagen. Por favor, asegúrate de enviar una foto nítida o contacta directamente con soporte.",
             parse_mode=ParseMode.MARKDOWN
         )
 
@@ -460,7 +518,7 @@ async def text_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     user_text = update.message.text.strip()
     await upsert_user(user.id, user.username, user.first_name)
 
-    # Comprobar si el administrador está en medio de una acción
+    # Comprobar si el administrador está en medio de una acción interactiva
     if await is_admin_user(user.id) and user.id in ADMIN_STATES:
         state = ADMIN_STATES.pop(user.id)
 
@@ -468,7 +526,7 @@ async def text_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             all_users = await get_all_user_ids()
             pay_url = await get_payment_url()
             kb = InlineKeyboardMarkup([
-                [InlineKeyboardButton(f"💳 Acceso VIP ({PRICE_EUR})", url=pay_url)],
+                [InlineKeyboardButton(f"💳 Siguiente Pronóstico ({PRICE_EUR})", url=pay_url)],
                 [InlineKeyboardButton("💬 Soporte Oficial", url=SUPPORT_URL)]
             ])
             sent = 0
@@ -493,7 +551,7 @@ async def text_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     # Mensaje normal de usuario: orientar con botones
     kb = await get_user_main_keyboard(user.id)
     await update.message.reply_text(
-        "👋 ¡Hola! Utiliza el menú para ver el pronóstico gratuito o enviar tu justificante de pago:",
+        "👋 ¡Hola! Utiliza el menú para consultar pronósticos o enviar tu justificante de pago:",
         reply_markup=kb
     )
 
@@ -511,31 +569,55 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_db = await get_user(user.id)
         if user_db.get("has_paid_access") == 1:
             welcome_text = (
-                f"👑 *¡Hola, {user.first_name}! Panel VIP.*\n\n"
-                "Tu cuenta tiene acceso exclusivo a los pronósticos con IA.\n\n"
-                "👇 *Pulsa para ver el pronóstico VIP activo:*"
+                f"👑 *¡Hola, {user.first_name}! Acceso Activo.*\n\n"
+                "Tu bot está reseteado con acceso al **Siguiente Pronóstico** con IA.\n\n"
+                "👇 *Pulsa para ver el pronóstico activo:*"
             )
+        elif user_db.get("has_seen_free_pick") == 1:
+            pay_url = await get_payment_url()
+            welcome_text = format_exhausted_free_pick(pay_url)
         else:
             welcome_text = (
                 f"👋 *¡Hola, {user.first_name}! Bienvenido a Accede Gratis.*\n\n"
                 "⚽ *¿Cómo funciona?*\n"
                 "Te facilitamos un **único pronóstico de fútbol 100% REAL de hoy**.\n"
                 "• El primer pronóstico es **GRATIS**.\n"
-                "• **Si sale VERDE**, la siguiente apuesta exclusiva será de pago (1.99€/mes).\n\n"
+                f"• **Si sale VERDE**, el siguiente será de pago ({PRICE_EUR}).\n"
+                "• **Si se falla**, se resetea gratis para que mañana lo recibas sin pagar nada.\n\n"
                 "👇 *Pulsa abajo para consultar el partido real de hoy:*"
             )
         kb = await get_user_main_keyboard(user.id)
         await query.edit_message_text(welcome_text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
 
-    # 2. Ver Pronóstico (Gratis o VIP según estado del usuario)
+    # 2. Ver Pronóstico (Gratis o Pagado con control de agotamiento)
     elif data == "view_pick":
         user_db = await get_user(user.id)
+
+        # Si pagó y tiene acceso activo: ve el pronóstico de pago y consume ese ciclo
         if user_db.get("has_paid_access") == 1:
-            pick = await get_vip_next_pick()
-            text = format_vip_pick(pick)
-        else:
-            pick = await get_free_pick()
-            text = format_daily_pick(pick)
+            pick = await get_next_paid_pick()
+            text = format_paid_pick(pick)
+            await mark_user_viewed_paid_pick(user.id)
+            kb = InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Menú Principal", callback_data="menu_home")]])
+            await query.edit_message_text(text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+            return
+
+        # Si ya consumió el gratis y no ha pagado: bloquear
+        if user_db.get("has_seen_free_pick") == 1:
+            pay_url = await get_payment_url()
+            text = format_exhausted_free_pick(pay_url)
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton(f"💳 Pagar Siguiente Pronóstico ({PRICE_EUR})", url=pay_url)],
+                [InlineKeyboardButton("🧾 Enviar Justificante de Pago", callback_data="btn_send_receipt")],
+                [InlineKeyboardButton("🏠 Menú Principal", callback_data="menu_home")]
+            ])
+            await query.edit_message_text(text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+            return
+
+        # Si es su primera vez gratuita: muestra y marca como visto
+        pick = await get_free_pick()
+        text = format_daily_pick(pick)
+        await mark_user_viewed_free_pick(user.id)
         kb = await get_pick_keyboard(user.id)
         await query.edit_message_text(text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
 
@@ -553,16 +635,29 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "admin_confirm_verde":
         if not await is_admin_user(user.id):
             return
-        await query.edit_message_text("🚀 Disparando aviso de VERDE y enlace de pago a todos los usuarios...")
+        await query.edit_message_text("🚀 Disparando aviso de VERDE y oferta del siguiente pronóstico a todos los usuarios...")
         sent, total = await broadcast_green_to_all(context.bot)
         panel_text, panel_kb = await build_admin_panel()
         await query.message.reply_text(
-            f"🎉 *¡ÉXITO! Partido marcado como VERDE.*\nSe ha notificado y enviado el link de pago a {sent}/{total} usuarios.",
+            f"🎉 *¡ÉXITO! Partido marcado como VERDE.*\nSe ha notificado y ofrecido el siguiente pronóstico a {sent}/{total} usuarios.",
             reply_markup=panel_kb,
             parse_mode=ParseMode.MARKDOWN
         )
 
-    # 5. Administración: Iniciar Difusión
+    # 5. Administración: Confirmar ROJO y Compensar
+    elif data == "admin_confirm_rojo":
+        if not await is_admin_user(user.id):
+            return
+        await query.edit_message_text("🔴 Marcando pronóstico como FALLADO, reseteando a todos los usuarios y enviando compensación...")
+        sent, total_reset = await broadcast_red_to_all(context.bot)
+        panel_text, panel_kb = await build_admin_panel()
+        await query.message.reply_text(
+            f"🛡️ *¡COMPENSACIÓN COMPLETADA!*\n• Partido marcado como FALLADO.\n• Se ha reseteado el bot a {total_reset} usuarios.\n• Notificación de regalo enviada a {sent} usuarios.",
+            reply_markup=panel_kb,
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+    # 6. Administración: Iniciar Difusión
     elif data == "admin_ask_broadcast":
         if not await is_admin_user(user.id):
             return
@@ -570,11 +665,11 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text(
             "✍️ *MODO DIFUSIÓN MASIVA*\n\n"
             "Escribe y envía en este chat el mensaje que deseas enviar a todos los usuarios registrados.\n"
-            "_(El mensaje se enviará automáticamente con los botones de pago y soporte)_",
+            f"_(Se adjuntarán los botones automáticos de compra de {PRICE_EUR} y soporte)_",
             parse_mode=ParseMode.MARKDOWN
         )
 
-    # 6. Administración: Cambiar Link de Pago
+    # 7. Administración: Cambiar Link de Pago
     elif data == "admin_change_payurl":
         if not await is_admin_user(user.id):
             return
@@ -583,12 +678,12 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text(
             f"🔗 *MODIFICAR ENLACE DE PAGO*\n\n"
             f"Enlace actual:\n`{pay_url}`\n\n"
-            "Escribe y envía ahora en este chat el nuevo enlace de pago (por ejemplo de KunfuPay):",
+            "Escribe y envía ahora en este chat el nuevo enlace de pago de KunfuPay:",
             parse_mode=ParseMode.MARKDOWN
         )
 
-    # 7. Administración: Refrescar Panel
-    elif data in ("admin_refresh", "admin_stats"):
+    # 8. Administración: Refrescar Panel
+    elif data == "admin_refresh":
         if not await is_admin_user(user.id):
             return
         panel_text, panel_kb = await build_admin_panel()
@@ -597,7 +692,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
-    # 8. Administración: Listar Justificantes Pendientes
+    # 9. Administración: Listar Justificantes Pendientes
     elif data == "admin_list_receipts":
         if not await is_admin_user(user.id):
             return
@@ -610,7 +705,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for r in pending[:5]:
             kb_rcpt = InlineKeyboardMarkup([
                 [
-                    InlineKeyboardButton("✅ Aprobar Acceso VIP", callback_data=f"rcpt_approve:{r['id']}"),
+                    InlineKeyboardButton("✅ Aprobar y Resetear Bot", callback_data=f"rcpt_approve:{r['id']}"),
                     InlineKeyboardButton("❌ Rechazar", callback_data=f"rcpt_reject:{r['id']}")
                 ]
             ])
@@ -630,56 +725,53 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 logger.error(f"Error mostrando justificante #{r['id']}: {e}")
 
-    # 9. Administración: Instrucciones de cambio de pronósticos
+    # 10. Administración: Ayuda de sintaxis de pronósticos
     elif data == "admin_info_freepick":
         await query.message.reply_text(
-            "⚽ *Para cambiar el partido gratuito de hoy:*\n\n"
-            "Envía un mensaje con este formato exacto:\n"
+            "⚽ *Actualizar Partido Gratuito:*\n"
             "`/pick Partido | Competición | Horario | Selección | Cuota | Stake | Análisis`\n\n"
             "Ejemplo:\n"
-            "`/pick Getafe CF vs RC Celta | LaLiga | Hoy 19:00 | Menos de 2.5 Goles | 1.65 | 1.5 | Partido muy cerrado.`",
+            "`/pick Francia vs Italia | UEFA Nations League | Hoy 20:45 | Ambos Equipos Marcan | 1.78 | 2.0 | Cruce en París con alto promedio ofensivo.`",
             parse_mode=ParseMode.MARKDOWN
         )
 
-    elif data == "admin_info_vippick":
+    elif data == "admin_info_paidpick":
         await query.message.reply_text(
-            "👑 *Para cambiar la siguiente apuesta VIP:*\n\n"
-            "Envía un mensaje con este formato exacto:\n"
-            "`/vippick Partido | Competición | Horario | Selección | Cuota | Stake | Análisis`\n\n"
+            f"👑 *Actualizar Siguiente Pronóstico ({PRICE_EUR}):*\n"
+            "`/paidpick Partido | Competición | Horario | Selección | Cuota | Stake | Análisis`\n\n"
             "Ejemplo:\n"
-            "`/vippick Real Madrid vs Real Sociedad | LaLiga | Mañana 21:00 | Gana Real Madrid + Más 1.5 | 1.88 | 2.0 | Excelente valor.`",
+            "`/paidpick Suiza vs España | UEFA Nations League | Próxima Jornada 20:45 | España gana o empate + Más 1.5 | 1.82 | 2.5 | La campeona de Europa mantiene un rendimiento sólido.`",
             parse_mode=ParseMode.MARKDOWN
         )
 
-    # 10. Aprobación y Rechazo de Justificantes
+    # 11. Aprobación y Rechazo de Justificantes (con Reseteo de Bot)
     elif data.startswith("rcpt_approve:"):
         if not await is_admin_user(user.id):
             return
         receipt_id = int(data.split(":")[1])
-        receipt = await update_receipt_status(receipt_id, "APROBADO")
+        receipt = await approve_receipt_and_reset_user(receipt_id)
         if receipt:
             try:
                 await query.edit_message_caption(
-                    caption=(query.message.caption or "") + "\n\n✅ *ESTADO: JUSTIFICANTE APROBADO POR EL ADMIN*",
+                    caption=(query.message.caption or "") + "\n\n✅ *ESTADO: APROBADO Y BOT RESETEADO*",
                     parse_mode=ParseMode.MARKDOWN
                 )
             except Exception:
                 pass
 
-            # Notificar al usuario inmediatamente
             target_uid = receipt["user_id"]
             kb_user = InlineKeyboardMarkup([
-                [InlineKeyboardButton("👑 Ver Siguiente Apuesta VIP", callback_data="view_pick")]
+                [InlineKeyboardButton("👑 Ver Siguiente Pronóstico", callback_data="view_pick")]
             ])
             try:
                 await context.bot.send_message(
                     chat_id=target_uid,
                     text=(
-                        "🎉 *¡ENHORABUENA! PAGO VERIFICADO CON ÉXITO* 🎉\n"
+                        f"🎉 *¡PAGO DE {PRICE_EUR} VERIFICADO CON ÉXITO!* 🎉\n"
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                        "Tu justificante de pago ha sido revisado y aprobado por el administrador.\n"
-                        "¡Ya tienes acceso total a la **Siguiente Apuesta VIP**!\n\n"
-                        "👇 *Pulsa el botón para ver el pronóstico exclusivo:*"
+                        "Tu justificante ha sido validado y **tu bot se ha reseteado**.\n"
+                        "Ya tienes acceso exclusivo al **Siguiente Pronóstico**.\n\n"
+                        "👇 *Pulsa el botón para ver el pronóstico completo:*"
                     ),
                     reply_markup=kb_user,
                     parse_mode=ParseMode.MARKDOWN
@@ -691,7 +783,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await is_admin_user(user.id):
             return
         receipt_id = int(data.split(":")[1])
-        receipt = await update_receipt_status(receipt_id, "RECHAZADO")
+        receipt = await reject_receipt(receipt_id)
         if receipt:
             try:
                 await query.edit_message_caption(
@@ -708,35 +800,37 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     text=(
                         "⚠️ *Aviso sobre tu justificante de pago*\n\n"
                         "El comprobante enviado no ha podido ser validado. "
-                        "Por favor, asegúrate de que la captura muestre el importe y la fecha claramente, "
-                        "o pulsa en Soporte para recibir asistencia."
+                        "Por favor, envía una captura clara donde se observe el pago o contacta a soporte para asistencia."
                     )
                 )
             except Exception:
                 pass
 
-# ── Configuración de Comandos en Telegram ────────────────────────────────────
+# ── Configuración de Comandos en Telegram (SOLO COMANDOS PÚBLICOS) ───────────
 
 async def setup_commands(app: Application):
+    """
+    IMPORTANTE: El menú /admintg y comandos de admin están COMPLETAMENTE OCULTOS.
+    No se registran en set_my_commands para que nadie más pueda verlos en el autocompletado.
+    """
     commands = [
-        BotCommand("start", "🚀 Inicio y explicación del bot"),
-        BotCommand("pronostico", "⚽ Ver pronóstico de hoy"),
-        BotCommand("vip", f"⭐ Acceso Siguiente Apuesta VIP ({PRICE_EUR})"),
+        BotCommand("start", "🚀 Iniciar bot y consultar pronóstico"),
+        BotCommand("pronostico", "⚽ Ver pronóstico de fútbol"),
+        BotCommand("siguiente", f"🎯 Adquirir Siguiente Pronóstico ({PRICE_EUR})"),
         BotCommand("terminos", "⚖️ Términos legales del servicio"),
-        BotCommand("admintg", "🛠️ Panel de Administrador Tipster"),
     ]
     await app.bot.set_my_commands(commands)
     try:
         await app.bot.set_my_description(
             "Accede Gratis: Pronósticos de Fútbol Reales con Inteligencia Artificial. "
-            "Recibe un pronóstico gratuito del día. Si se acierta (VERDE), accede a la siguiente apuesta exclusiva."
+            "Recibe un pronóstico gratuito del día. Si se acierta (VERDE), accede al siguiente. Si se falla, recibes compensación gratuita."
         )
         await app.bot.set_my_short_description(
-            "Pronósticos de Fútbol Reales con IA & Acceso VIP."
+            "Pronósticos de Fútbol Reales con IA."
         )
     except Exception as e:
         logger.warning(f"No se pudo actualizar descripción: {e}")
-    logger.info("✅ Comandos y descripciones registrados en Telegram")
+    logger.info("✅ Comandos públicos registrados en Telegram (Comandos admin ocultos)")
 
 # ── Construcción y Arranque de la Aplicación ────────────────────────────────
 
@@ -746,17 +840,20 @@ def build_app() -> Application:
     # Comandos públicos y de usuario
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("pronostico", cmd_pronostico))
-    app.add_handler(CommandHandler("vip", cmd_vip))
+    app.add_handler(CommandHandler("siguiente", cmd_siguiente))
+    app.add_handler(CommandHandler("vip", cmd_siguiente))  # Redirección por compatibilidad
     app.add_handler(CommandHandler("terminos", cmd_terminos))
 
-    # Comandos de administración
+    # Comandos de administración (TOTALMENTE OCULTOS)
     app.add_handler(CommandHandler("admintg", cmd_admintg))
     app.add_handler(CommandHandler("verde", cmd_verde))
     app.add_handler(CommandHandler("marcar_verde", cmd_verde))
+    app.add_handler(CommandHandler("rojo", cmd_rojo))
+    app.add_handler(CommandHandler("marcar_rojo", cmd_rojo))
     app.add_handler(CommandHandler("pick", cmd_nuevo_pick))
     app.add_handler(CommandHandler("nuevo_pick", cmd_nuevo_pick))
-    app.add_handler(CommandHandler("vippick", cmd_nuevo_vippick))
-    app.add_handler(CommandHandler("nuevo_vippick", cmd_nuevo_vippick))
+    app.add_handler(CommandHandler("paidpick", cmd_nuevo_paidpick))
+    app.add_handler(CommandHandler("vippick", cmd_nuevo_paidpick))
     app.add_handler(CommandHandler("difusion", cmd_difusion))
     app.add_handler(CommandHandler("setpayurl", cmd_setpayurl))
 
@@ -774,7 +871,7 @@ def build_app() -> Application:
 async def main():
     logger.info(f"🚀 Iniciando {BOT_NAME}...")
     await init_db()
-    logger.info("✅ Base de datos SQLite inicializada")
+    logger.info("✅ Base de datos SQLite lista con partidos reales y reglas de reseteo")
 
     try:
         await start_health_server()

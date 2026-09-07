@@ -16,8 +16,8 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 DEFAULT_PAYMENT_URL = os.getenv("PAYMENT_URL", "https://store.kunfupay.com/elprograma/pgUKnc9F")
 PAYMENT_URL = DEFAULT_PAYMENT_URL
 
-# Precio oficial
-PRICE_EUR = "Solo 1.99€ al mes"
+# Precio oficial por siguiente pronóstico
+PRICE_EUR = "7.99€"
 
 # Soporte
 SUPPORT_USER = "@AccesoSoporteVIP"
