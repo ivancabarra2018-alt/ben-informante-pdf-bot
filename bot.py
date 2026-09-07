@@ -1,10 +1,10 @@
 """
-🤖 Ben Informante | Academia de Negocios Digitales & Consultoría IA
-Bot oficial certificado y optimizado para Telegram Ads (Unión Europea).
+🤖 Accede Gratis | Pronósticos Deportivos & IA VIP (@Accedogratis_bot)
+Bot oficial de Embudo de Conversión para Tipster con Inteligencia Artificial.
+Cumplimiento normativo para Telegram Ads (Unión Europea).
 """
 import os
 import sys
-import io
 import logging
 import asyncio
 from aiohttp import web
@@ -20,17 +20,16 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from config import (
     BOT_TOKEN, BOT_NAME, BOT_USERNAME, PAYMENT_URL,
-    SUPPORT_USER, SUPPORT_URL, OFFICIAL_CHANNEL,
-    FREE_QUESTIONS_LIMIT, PRICE_EUR
+    SUPPORT_USER, SUPPORT_URL, FREE_ANALYSIS_LIMIT, PRICE_EUR
 )
 from database import (
-    init_db, upsert_user, get_user, increment_question,
-    get_all_user_ids, get_stats, set_pro_status
+    init_db, upsert_user, get_user, increment_analysis,
+    get_all_user_ids, get_stats, set_vip_status
 )
-from handlers.ai_expert import consult_ai_expert
+from handlers.ai_expert import consult_tipster_ai
 from handlers.content import (
-    LESSON_1_TEXT, LESSON_2_TEXT, ABOUT_SERVICE_TEXT,
-    PRO_OFFER_TEXT, TERMS_TEXT, PRIVACY_TEXT
+    DAILY_TIP_TEXT, BANKROLL_GUIDE_TEXT, VIP_BENEFITS_TEXT,
+    TERMS_TEXT, PRIVACY_TEXT
 )
 
 # Logging
@@ -38,24 +37,24 @@ logging.basicConfig(
     format="%(asctime)s │ %(levelname)-8s │ %(name)s │ %(message)s",
     level=logging.INFO
 )
-logger = logging.getLogger("BenInformanteBot")
+logger = logging.getLogger("AccedeGratisBot")
 
 # ── Teclados Reutilizables ───────────────────────────────────────────────────
 
 def get_main_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🎓 Lección 1: Automatización", callback_data="view_lesson_1"),
-            InlineKeyboardButton("📈 Lección 2: Monetización", callback_data="view_lesson_2"),
+            InlineKeyboardButton("🎁 Análisis del Día (Regalo)", callback_data="view_daily_tip"),
+            InlineKeyboardButton("📚 Guía Bankroll & Stake", callback_data="view_bankroll"),
         ],
         [
-            InlineKeyboardButton("🤖 Consultar al Experto IA (2 gratis)", callback_data="btn_ask_ai"),
+            InlineKeyboardButton("🤖 Pedir Análisis al Experto IA (2 gratis)", callback_data="btn_ask_ai"),
         ],
         [
-            InlineKeyboardButton(f"⭐ Membresía PRO ({PRICE_EUR})", url=PAYMENT_URL),
+            InlineKeyboardButton(f"⭐ Acceso Canal VIP ({PRICE_EUR})", url=PAYMENT_URL),
         ],
         [
-            InlineKeyboardButton("🏢 Sobre el Servicio", callback_data="view_about"),
+            InlineKeyboardButton("💎 Ventajas del VIP", callback_data="view_vip"),
             InlineKeyboardButton("⚖️ Términos & RGPD", callback_data="view_legal"),
         ],
         [
@@ -68,13 +67,14 @@ def get_back_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🏠 Menú Principal", callback_data="menu_home")]
     ])
 
-# ── Servidor de Salud y Anti-Hibernación para Render ─────────────────────────
+# ── Servidor de Salud y Anti-Hibernación ──────────────────────────────────────
 
 async def keep_alive_pinger():
-    """Envía un ping periódico para evitar que el plan gratuito de Render hiberne el bot."""
+    """Envía pings periódicos entre los bots para mantener Render 100% activo 24/7."""
     import urllib.request
     urls = [
         "https://ben-informante-pdf-bot.onrender.com/health",
+        "https://deportes-analisis-bot.onrender.com/health",
         "https://qr-iformaciones-bot.onrender.com/health"
     ]
     await asyncio.sleep(45)
@@ -85,15 +85,15 @@ async def keep_alive_pinger():
                 with urllib.request.urlopen(req, timeout=15) as resp:
                     pass
             except Exception as e:
-                logger.debug(f"KeepAlive ping error: {e}")
-        await asyncio.sleep(480)  # Ping cada 8 minutos (el límite de inactividad de Render es 15 min)
+                logger.debug(f"KeepAlive error {url}: {e}")
+        await asyncio.sleep(480)  # Cada 8 minutos
 
 
 async def start_health_server():
     """Permite a Render verificar que el servicio web está activo."""
     port = int(os.environ.get("PORT", 8080))
     async def handle_health(_):
-        return web.Response(text="OK - Ben Informante Bot Operativo ✅")
+        return web.Response(text="OK - Accede Gratis Tipster Bot Operativo ✅")
 
     app = web.Application()
     app.router.add_get("/", handle_health)
@@ -103,9 +103,7 @@ async def start_health_server():
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
     logger.info(f"🌐 Health server corriendo en puerto {port}")
-    # Arrancar tarea en segundo plano que mantiene el contenedor siempre despierto
     asyncio.create_task(keep_alive_pinger())
-
 
 # ── Comandos Principales ─────────────────────────────────────────────────────
 
@@ -115,13 +113,12 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["waiting_for_question"] = False
 
     welcome_text = (
-        f"👋 *¡Hola, {user.first_name}! Bienvenido a Ben Informante.*\n\n"
-        "🚀 *Tu Consultor y Academia de Negocios con IA:*\n"
-        "• 🎓 *2 Lecciones prácticas:* Automatización y monetización digital.\n"
-        "• 🤖 *2 Consultas IA gratis:* Pregúntale a nuestro experto cualquier duda sobre tu negocio o proyecto.\n"
-        "• ⭐ *Membresía PRO:* Consultoría y formación ilimitada por solo 1.99€ al mes.\n\n"
+        f"👋 *¡Hola, {user.first_name}! Bienvenido a Accede Gratis.*\n\n"
+        "🎯 *Tu Analista y Embudo de Pronósticos Deportivos con IA:*\n"
+        "• 🎁 *Análisis del Día:* Análisis táctico y estadístico de regalo.\n"
+        "• 🤖 *2 Análisis con IA gratis:* Pregúntale a la IA sobre cualquier partido o cuota.\n"
+        "• 💎 *Acceso Canal VIP:* Pronósticos diarios de alto valor por solo 1.99€ al mes.\n\n"
         "👇 *Selecciona una opción para comenzar:*"
-
     )
     await update.message.reply_text(
         welcome_text,
@@ -129,65 +126,63 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode=ParseMode.MARKDOWN
     )
 
-
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         "📖 *Guía de Comandos Oficiales:*\n\n"
         "• /start — Menú interactivo principal\n"
-        "• /lecciones — Acceso a las clases formativas\n"
-        "• /pregunta — Formular consulta al Consultor IA\n"
-        "• /pro — Información y activación de Membresía PRO\n"
+        "• /regalo — Ver el análisis del día gratuito\n"
+        "• /analisis — Formular consulta al Analista IA\n"
+        "• /vip — Información del Canal VIP\n"
         "• /terminos — Términos y condiciones legales\n"
-        "• /privacidad — Política de protección de datos RGPD\n"
-        "• /soporte — Canal de atención al cliente"
+        "• /privacidad — Política de Privacidad RGPD\n"
+        "• /soporte — Canal de atención oficial"
     )
     await update.message.reply_text(text, reply_markup=get_back_keyboard(), parse_mode=ParseMode.MARKDOWN)
 
 async def cmd_pregunta(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     u_data = await get_user(user.id)
-    used = u_data.get("questions_used", 0)
-    is_pro = u_data.get("is_pro", 0)
+    used = u_data.get("analysis_used", 0)
+    is_vip = u_data.get("is_vip", 0)
 
-    if not is_pro and used >= FREE_QUESTIONS_LIMIT:
+    if not is_vip and used >= FREE_ANALYSIS_LIMIT:
         text = (
-            "🔒 *Has alcanzado el límite de tu prueba gratuita (2/2 consultas).*\n\n"
-            "Esperamos que las respuestas del Consultor IA hayan aportado claridad a tus proyectos.\n\n"
-            "Para continuar formulando preguntas ilimitadas, acceder a más de 20 módulos avanzados "
-            "y recibir soporte prioritario, activa tu acceso PRO:\n\n"
-            f"💳 *Membresía PRO:* `{PRICE_EUR}`\n"
-            "Sin permanencia. Cancela cuando quieras."
+            "🔒 *Has alcanzado el límite de tu prueba gratuita (2/2 análisis).*\n\n"
+            "Esperamos que los informes de Valor Esperado (+EV) hayan demostrado la potencia de nuestro método.\n\n"
+            "Para continuar recibiendo análisis ilimitados de cualquier evento y acceder a todos los pronósticos diarios, "
+            "entra en nuestro Club VIP:\n\n"
+            f"💳 *Acceso VIP:* `{PRICE_EUR}`\n"
+            "Sin permanencia obligatoria. Cancela en cualquier instante."
         )
         kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton(f"⭐ Activar Membresía PRO ({PRICE_EUR})", url=PAYMENT_URL)],
+            [InlineKeyboardButton(f"⭐ Entrar al Canal VIP ({PRICE_EUR})", url=PAYMENT_URL)],
             [InlineKeyboardButton("🏠 Menú Principal", callback_data="menu_home")]
         ])
         await update.message.reply_text(text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
         return
 
     context.user_data["waiting_for_question"] = True
-    remaining = "Ilimitadas (PRO)" if is_pro else f"{FREE_QUESTIONS_LIMIT - used} disponibles"
+    remaining = "Ilimitadas (VIP)" if is_vip else f"{FREE_ANALYSIS_LIMIT - used} disponibles"
     text = (
-        "🤖 *Consultor Estratégico IA — Sesión Activa*\n"
+        "🤖 *Analista Deportivo IA — Consulta Activa*\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📊 Consultas de prueba: *{remaining}*\n\n"
-        "Escribe a continuación tu duda o proyecto sobre:\n"
-        "• Automatización de tareas o integración de APIs.\n"
-        "• Modelos de monetización y servicios digitales.\n"
-        "• Estrategia de productividad o prompts.\n\n"
-        "✍️ *Envía tu mensaje directamente en el chat:* 👇"
+        f"📊 Análisis de prueba: *{remaining}*\n\n"
+        "Indica qué partido, cuota o mercado deseas que analice la IA:\n"
+        "• Ejemplo: *'¿Tiene valor apostar a victoria del Arsenal a cuota 1.85?'*\n"
+        "• Ejemplo: *'Análisis del partido Barcelona vs Nápoles en Champions'*\n\n"
+        "✍️ *Escribe tu pregunta directamente a continuación:* 👇"
     )
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("❌ Cancelar y Volver", callback_data="menu_home")]
     ])
     await update.message.reply_text(text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
 
-async def cmd_pro(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cmd_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"💳 Adquirir Acceso PRO ({PRICE_EUR})", url=PAYMENT_URL)],
+        [InlineKeyboardButton(f"💳 Adquirir Acceso VIP ({PRICE_EUR})", url=PAYMENT_URL)],
         [InlineKeyboardButton("🏠 Menú Principal", callback_data="menu_home")]
     ])
-    await update.message.reply_text(PRO_OFFER_TEXT, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+    await update.message.reply_text(VIP_BENEFITS_TEXT, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
 
 async def cmd_terminos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(TERMS_TEXT, reply_markup=get_back_keyboard(), parse_mode=ParseMode.MARKDOWN)
@@ -198,34 +193,36 @@ async def cmd_privacidad(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     stats = await get_stats()
     text = (
-        "📊 *Estadísticas de la Academia:*\n\n"
-        f"• Usuarios registrados: `{stats['total_users']}`\n"
-        f"• Consultas IA generadas: `{stats['total_questions']}`\n"
-        f"• Miembros PRO activos: `{stats['total_pro']}`"
+        "📊 *Estadísticas del Embudo VIP:*\n\n"
+        f"• Usuarios registrados en el bot: `{stats['total_users']}`\n"
+        f"• Análisis generados por IA: `{stats['total_analyses']}`\n"
+        f"• Suscriptores VIP activos: `{stats['total_vip']}`"
     )
     await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
 async def cmd_difusion(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Permite difundir un anuncio a todos los usuarios."""
-    user_id = update.effective_user.id
+    """Permite al tipster enviar difusiones masivas (promociones, resumen de verdes) a todos."""
     msg = update.message.text.replace("/difusion", "").strip()
     if not msg:
-        await update.message.reply_text("Uso: `/difusion Tu mensaje aquí`", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text("Uso: `/difusion Tu mensaje promocional aquí`", parse_mode=ParseMode.MARKDOWN)
         return
 
     all_users = await get_all_user_ids()
-    await update.message.reply_text(f"📢 Enviando difusión a {len(all_users)} usuarios...")
+    await update.message.reply_text(f"📢 Enviando difusión a {len(all_users)} usuarios del bot...")
     sent = 0
     for uid in all_users:
         try:
-            await context.bot.send_message(chat_id=uid, text=msg, parse_mode=ParseMode.MARKDOWN)
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton(f"⭐ Entrar al VIP ({PRICE_EUR})", url=PAYMENT_URL)]
+            ])
+            await context.bot.send_message(chat_id=uid, text=msg, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
             sent += 1
             await asyncio.sleep(0.05)
         except Exception:
             pass
     await update.message.reply_text(f"✅ Difusión completada: {sent}/{len(all_users)} mensajes entregados.")
 
-# ── Manejador de Botones Inline (Callbacks) ──────────────────────────────────
+# ── Manejador de Botones Inline ──────────────────────────────────────────────
 
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -234,77 +231,76 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "menu_home":
         context.user_data["waiting_for_question"] = False
-        user = update.effective_user
         text = (
             f"🏠 *Menú Principal — {BOT_NAME}*\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "Selecciona la sección a la que deseas acceder:"
+            "Selecciona una opción del menú:"
         )
         await query.edit_message_text(text, reply_markup=get_main_keyboard(), parse_mode=ParseMode.MARKDOWN)
 
-    elif data == "view_lesson_1":
+    elif data == "view_daily_tip":
         context.user_data["waiting_for_question"] = False
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("🤖 Consultar al Experto sobre esto", callback_data="btn_ask_ai")],
-            [InlineKeyboardButton("📈 Ir a Lección 2", callback_data="view_lesson_2")],
+            [InlineKeyboardButton(f"⭐ Entrar al Canal VIP ({PRICE_EUR})", url=PAYMENT_URL)],
             [InlineKeyboardButton("🏠 Menú Principal", callback_data="menu_home")]
         ])
-        await query.edit_message_text(LESSON_1_TEXT, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+        await query.edit_message_text(DAILY_TIP_TEXT, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
 
-    elif data == "view_lesson_2":
+    elif data == "view_bankroll":
         context.user_data["waiting_for_question"] = False
         kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🤖 Consultar al Experto sobre esto", callback_data="btn_ask_ai")],
-            [InlineKeyboardButton("🎓 Ver Lección 1", callback_data="view_lesson_1")],
+            [InlineKeyboardButton("🤖 Preguntar Dudas a la IA", callback_data="btn_ask_ai")],
+            [InlineKeyboardButton("🎁 Ver Análisis del Día", callback_data="view_daily_tip")],
             [InlineKeyboardButton("🏠 Menú Principal", callback_data="menu_home")]
         ])
-        await query.edit_message_text(LESSON_2_TEXT, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+        await query.edit_message_text(BANKROLL_GUIDE_TEXT, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
 
     elif data == "btn_ask_ai":
         user = update.effective_user
         u_data = await get_user(user.id)
-        used = u_data.get("questions_used", 0)
-        is_pro = u_data.get("is_pro", 0)
+        used = u_data.get("analysis_used", 0)
+        is_vip = u_data.get("is_vip", 0)
 
-        if not is_pro and used >= FREE_QUESTIONS_LIMIT:
+        if not is_vip and used >= FREE_ANALYSIS_LIMIT:
             text = (
-                "🔒 *Has utilizado tus 2 consultas de prueba gratuita.*\n\n"
-                "Para seguir recibiendo asesoría estratégica ilimitada, recomendaciones personalizadas "
-                "y plantillas operativas, suscríbete a la Membresía PRO:\n\n"
+                "🔒 *Has utilizado tus 2 análisis de prueba gratuita.*\n\n"
+                "Para seguir recibiendo informes de Valor Esperado (+EV), recomendaciones de stake "
+                "y todos los pronósticos verificados, entra al Canal VIP:\n\n"
                 f"💳 *Tarifa Oficial:* `{PRICE_EUR}`\n"
-                "Total transparencia. Sin compromiso de permanencia."
+                "Acceso inmediato. Cancela cuando quieras."
             )
             kb = InlineKeyboardMarkup([
-                [InlineKeyboardButton(f"⭐ Activar Membresía PRO ({PRICE_EUR})", url=PAYMENT_URL)],
+                [InlineKeyboardButton(f"⭐ Entrar al Canal VIP ({PRICE_EUR})", url=PAYMENT_URL)],
                 [InlineKeyboardButton("🏠 Menú Principal", callback_data="menu_home")]
             ])
             await query.edit_message_text(text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
             return
 
         context.user_data["waiting_for_question"] = True
-        remaining = "Ilimitadas (PRO)" if is_pro else f"{FREE_QUESTIONS_LIMIT - used} de {FREE_QUESTIONS_LIMIT}"
+        remaining = "Ilimitadas (VIP)" if is_vip else f"{FREE_ANALYSIS_LIMIT - used} de {FREE_ANALYSIS_LIMIT}"
         text = (
-            "🤖 *Consultoría Estratégica con IA*\n"
+            "🤖 *Consultoría de Pronósticos con IA*\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"📊 Consultas disponibles: *{remaining}*\n\n"
-            "Plantea cualquier duda sobre:\n"
-            "• Casos reales de automatización en tu negocio.\n"
-            "• Validación de ideas o servicios digitales.\n"
-            "• Selección de stack tecnológico con IA.\n\n"
-            "✍️ *Por favor, escribe tu pregunta ahora:* 👇"
+            f"📊 Análisis disponibles: *{remaining}*\n\n"
+            "Pregúntale a la IA sobre cualquier partido, cuota o mercado:\n"
+            "• ¿Tiene valor la cuota de X equipo?\n"
+            "• Tendencia de goles o puntos para hoy.\n"
+            "• Stake recomendado según el riesgo.\n\n"
+            "✍️ *Por favor, escribe tu consulta ahora:* 👇"
         )
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("❌ Cancelar", callback_data="menu_home")]
         ])
         await query.edit_message_text(text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
 
-    elif data == "view_about":
+    elif data == "view_vip":
         context.user_data["waiting_for_question"] = False
         kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("💬 Contactar Soporte", url=SUPPORT_URL)],
+            [InlineKeyboardButton(f"💳 Suscribirme al VIP ({PRICE_EUR})", url=PAYMENT_URL)],
             [InlineKeyboardButton("🏠 Menú Principal", callback_data="menu_home")]
         ])
-        await query.edit_message_text(ABOUT_SERVICE_TEXT, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+        await query.edit_message_text(VIP_BENEFITS_TEXT, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
 
     elif data == "view_legal":
         context.user_data["waiting_for_question"] = False
@@ -315,8 +311,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ])
         text = (
             "📋 *Transparencia Legal y Cumplimiento Normativo (UE)*\n\n"
-            "En Ben Informante operamos con estricto apego a las directivas de consumo "
-            "y protección de datos de la Unión Europea.\n\n"
+            "En Accede Gratis operamos con total transparencia conforme a las normativas "
+            "europeas de comercio digital y protección de datos.\n\n"
             "Selecciona el documento que deseas consultar:"
         )
         await query.edit_message_text(text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
@@ -341,63 +337,57 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     user = update.effective_user
     text = update.message.text.strip()
 
-    # Si está en modo consulta activa
     if context.user_data.get("waiting_for_question", False):
         u_data = await get_user(user.id)
-        used = u_data.get("questions_used", 0)
-        is_pro = u_data.get("is_pro", 0)
+        used = u_data.get("analysis_used", 0)
+        is_vip = u_data.get("is_vip", 0)
 
-        if not is_pro and used >= FREE_QUESTIONS_LIMIT:
+        if not is_vip and used >= FREE_ANALYSIS_LIMIT:
             context.user_data["waiting_for_question"] = False
             kb = InlineKeyboardMarkup([
-                [InlineKeyboardButton(f"⭐ Activar Membresía PRO ({PRICE_EUR})", url=PAYMENT_URL)],
+                [InlineKeyboardButton(f"⭐ Entrar al Canal VIP ({PRICE_EUR})", url=PAYMENT_URL)],
                 [InlineKeyboardButton("🏠 Menú Principal", callback_data="menu_home")]
             ])
             await update.message.reply_text(
-                "🔒 *Has agotado tus 2 consultas gratuitas.*\n"
-                "Para consultar sin límites activa tu membresía PRO:",
+                "🔒 *Has agotado tus 2 análisis gratuitos.*\n"
+                "Para recibir pronósticos diarios y análisis ilimitados entra al VIP:",
                 reply_markup=kb,
                 parse_mode=ParseMode.MARKDOWN
             )
             return
 
-        # Enviar acción escribiendo
         await update.message.reply_chat_action(ChatAction.TYPING)
-
-        # Consultar a la IA
-        ai_response = consult_ai_expert(text)
-
-        # Registrar consulta
-        new_count = await increment_question(user.id)
+        ai_response = consult_tipster_ai(text)
+        new_count = await increment_analysis(user.id)
         context.user_data["waiting_for_question"] = False
 
-        if not is_pro:
-            header = f"📊 *[Consulta de Prueba {new_count} de {FREE_QUESTIONS_LIMIT}]*\n\n"
-            if new_count >= FREE_QUESTIONS_LIMIT:
+        if not is_vip:
+            header = f"📊 *[Informe de Valor IA {new_count} de {FREE_ANALYSIS_LIMIT}]*\n\n"
+            if new_count >= FREE_ANALYSIS_LIMIT:
                 footer = (
                     "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                    "🎉 *Has completado tus 2 consultas de prueba gratuita.*\n"
-                    "¿Deseas seguir acelerando tus proyectos con consultoría ilimitada?"
+                    "🎉 *Has completado tus 2 análisis de prueba gratuita.*\n"
+                    "¿Deseas recibir todas las selecciones verificadas del día en el Canal VIP?"
                 )
                 kb = InlineKeyboardMarkup([
-                    [InlineKeyboardButton(f"⭐ Suscribirme a PRO ({PRICE_EUR})", url=PAYMENT_URL)],
+                    [InlineKeyboardButton(f"⭐ Entrar al Canal VIP ({PRICE_EUR})", url=PAYMENT_URL)],
                     [InlineKeyboardButton("🏠 Menú Principal", callback_data="menu_home")]
                 ])
             else:
                 footer = (
                     "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                    f"💡 *Te queda 1 consulta gratuita.*"
+                    f"💡 *Te queda 1 análisis gratuito de prueba.*"
                 )
                 kb = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🤖 Realizar mi 2ª Consulta", callback_data="btn_ask_ai")],
-                    [InlineKeyboardButton("⭐ Ver Membresía PRO", url=PAYMENT_URL)],
+                    [InlineKeyboardButton("🤖 Realizar mi 2º Análisis", callback_data="btn_ask_ai")],
+                    [InlineKeyboardButton(f"⭐ Ver Canal VIP ({PRICE_EUR})", url=PAYMENT_URL)],
                     [InlineKeyboardButton("🏠 Menú Principal", callback_data="menu_home")]
                 ])
         else:
-            header = "⭐ *[Consultoría PRO Ilimitada]*\n\n"
+            header = "⭐ *[Análisis VIP Ilimitado]*\n\n"
             footer = ""
             kb = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🤖 Otra Consulta", callback_data="btn_ask_ai")],
+                [InlineKeyboardButton("🤖 Otro Análisis", callback_data="btn_ask_ai")],
                 [InlineKeyboardButton("🏠 Menú Principal", callback_data="menu_home")]
             ])
 
@@ -405,13 +395,13 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(full_message, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
         return
 
-    # Mensaje de texto casual sin haber pulsado el botón
     suggest_kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🤖 Preguntar al Experto IA", callback_data="btn_ask_ai")],
+        [InlineKeyboardButton("🎁 Ver Análisis de Regalo", callback_data="view_daily_tip")],
+        [InlineKeyboardButton("🤖 Pedir Análisis IA", callback_data="btn_ask_ai")],
         [InlineKeyboardButton("🏠 Ver Menú Completo", callback_data="menu_home")]
     ])
     await update.message.reply_text(
-        "👋 ¡Hola! Si deseas formular una consulta sobre negocios o IA, pulsa el botón inferior:",
+        "👋 ¡Hola! Si deseas consultar un pronóstico o ver el análisis del día, pulsa una opción:",
         reply_markup=suggest_kb
     )
 
@@ -419,52 +409,46 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def setup_commands(app: Application):
     commands = [
-        BotCommand("start", "🚀 Menú principal de la Academia"),
-        BotCommand("lecciones", "📚 Ver las lecciones magistrales"),
-        BotCommand("pregunta", "🤖 Consultar al Experto IA"),
-        BotCommand("pro", f"⭐ Membresía PRO ({PRICE_EUR})"),
+        BotCommand("start", "🚀 Menú principal del Club VIP"),
+        BotCommand("regalo", "🎁 Análisis del Día gratuito"),
+        BotCommand("analisis", "🤖 Pedir Análisis al Experto IA"),
+        BotCommand("vip", f"⭐ Acceso VIP ({PRICE_EUR})"),
         BotCommand("terminos", "⚖️ Términos y Condiciones"),
         BotCommand("privacidad", "🔒 Política de Privacidad RGPD"),
-        BotCommand("soporte", "💬 Contacto y atención"),
+        BotCommand("soporte", "💬 Atención y dudas"),
     ]
     await app.bot.set_my_commands(commands)
     try:
         await app.bot.set_my_description(
-            "Academia de Negocios Digitales & Consultoría con IA. "
-            "Aprende automatización, modelos de monetización y resuelve tus dudas con nuestro consultor IA en tiempo real."
+            "Comunidad Privada y Análisis Estadístico de Pronósticos Deportivos con IA. "
+            "Detección de Valor Esperado (+EV), gestión de bankroll y pronósticos diarios verificados."
         )
         await app.bot.set_my_short_description(
-            "Academia de Negocios Digitales y Consultor Estratégico IA."
+            "Pronósticos Deportivos con IA & Acceso al Canal VIP."
         )
     except Exception as e:
         logger.warning(f"No se pudo actualizar descripción: {e}")
-    logger.info("✅ 7 comandos oficiales y descripciones registrados en Telegram")
-
+    logger.info("✅ Comandos y descripciones de Tipster VIP registrados en Telegram")
 
 # ── Inicialización y Main ───────────────────────────────────────────────────
 
 def build_app() -> Application:
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # Comandos
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
-    app.add_handler(CommandHandler("lecciones", lambda u, c: u.message.reply_text("Elige lección:", reply_markup=InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎓 Lección 1", callback_data="view_lesson_1")],
-        [InlineKeyboardButton("📈 Lección 2", callback_data="view_lesson_2")]
-    ]))))
-    app.add_handler(CommandHandler("pregunta", cmd_pregunta))
-    app.add_handler(CommandHandler("pro", cmd_pro))
+    app.add_handler(CommandHandler("regalo", lambda u, c: u.message.reply_text(DAILY_TIP_TEXT, reply_markup=InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"⭐ Entrar al VIP ({PRICE_EUR})", url=PAYMENT_URL)]
+    ]), parse_mode=ParseMode.MARKDOWN)))
+    app.add_handler(CommandHandler("analisis", cmd_pregunta))
+    app.add_handler(CommandHandler("vip", cmd_vip))
     app.add_handler(CommandHandler("terminos", cmd_terminos))
     app.add_handler(CommandHandler("privacidad", cmd_privacidad))
-    app.add_handler(CommandHandler("soporte", lambda u, c: u.message.reply_text(f"Atención al cliente: {SUPPORT_USER}", reply_markup=get_back_keyboard())))
+    app.add_handler(CommandHandler("soporte", lambda u, c: u.message.reply_text(f"Soporte oficial VIP: {SUPPORT_USER}", reply_markup=get_back_keyboard())))
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("difusion", cmd_difusion))
 
-    # Callbacks
     app.add_handler(CallbackQueryHandler(callback_handler))
-
-    # Mensajes de texto
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
 
     return app
@@ -474,7 +458,6 @@ async def main():
     await init_db()
     logger.info("✅ Base de datos SQLite lista")
 
-    # Iniciar servidor de health check
     try:
         await start_health_server()
     except Exception as e:

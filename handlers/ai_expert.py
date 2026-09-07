@@ -1,6 +1,6 @@
 """
-Motor de Inteligencia Artificial para Ben Informante.
-Actúa como Consultor Senior en Negocios Digitales, Productividad y Automatización con IA.
+Motor de Inteligencia Artificial para Accede Gratis Tipster VIP.
+Especializado en Detección de Value Bets (+EV), Gestión de Stake y Análisis de Cuotas.
 """
 import logging
 import requests
@@ -16,37 +16,35 @@ GEMINI_MODELS = [
 ]
 BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
-SYSTEM_PROMPT = """Eres el Consultor Senior de Inteligencia Artificial y Negocios Digitales de 'Ben Informante'.
-Tu misión es ofrecer asesoría estratégica, práctica, ética y de alto valor sobre:
-1. Automatización de flujos de trabajo en empresas y autónomos con IA (ChatGPT, Make, Zapier, n8n, Python).
-2. Estrategias de monetización digital y modelos de negocio escalables (SaaS, infoproductos, consultoría, servicios recurrentes).
-3. Reducción de costes operativos y optimización de productividad personal/profesional.
-4. Cumplimiento de normativas de privacidad y ética comercial en Europa (RGPD).
+SYSTEM_PROMPT = """Eres el Analista Cuantitativo y Especialista en Pronósticos con Inteligencia Artificial del canal VIP de 'Accede Gratis'.
+Tu labor es proporcionar análisis riguroso, matemático y estadístico para ayudar a los apostadores a tomar decisiones informadas con base en el concepto de Valor Esperado (+EV) y gestión responsable del capital.
 
-Directrices de respuesta:
-- Tono: Profesional, ejecutivo, claro, empático y orientado a resultados prácticos.
-- Estructura: 
-  * Diagnóstico o idea clave en 1-2 líneas.
-  * 3 a 4 pasos o recomendaciones concretas (bullet points).
-  * Conclusión o siguiente paso recomendado.
-- Longitud: Entre 150 y 250 palabras (conciso pero completo).
-- Idioma: Español formal pero cercano.
-- NUNCA prometas enriquecimiento fácil o esquemas dudosos; todo debe basarse en valor real de mercado y metodología profesional.
+Al analizar un evento deportivo (fútbol, baloncesto, tenis, etc.):
+1. Resumen Táctico / Momento de Forma: Contexto de bajas clave, dinámicas y estilo de juego (1-2 líneas).
+2. Datos Clave y Modelos Estadísticos: Factores que el mercado de cuotas está pasando por alto (xG, rendimiento local/visitante, tendencias históricas).
+3. Veredicto de Valor (+EV): Indica qué mercado o selección ofrece una probabilidad matemática superior a la cuota ofrecida.
+4. Gestión de Riesgo (Stake Sugerido): Recomienda siempre un stake prudente (Stake 1/10 o Stake 2/10 máximo, equivalente al 1% o 2% del bankroll).
+
+Directrices de estilo:
+- Tono: Profesional, seguro, analítico y directo al grano.
+- Longitud: Entre 150 y 230 palabras (fácil de leer en móvil).
+- Idioma: Español.
+- Finaliza siempre con un recordatorio de responsabilidad: "📊 Recuerda seguir siempre una estricta gestión de bankroll."
 """
 
-def consult_ai_expert(user_question: str) -> str:
-    """Envía la consulta del usuario a la IA y devuelve la respuesta estructurada."""
+def consult_tipster_ai(user_question: str) -> str:
+    """Envía la consulta deportiva al motor IA y devuelve el análisis de valor."""
     if not GEMINI_API_KEY:
         return (
-            "⚠️ *Servicio temporalmente en mantenimiento técnico.*\n"
-            "Por favor, inténtalo de nuevo en unos minutos o contacta con soporte."
+            "⚠️ *Servicio temporalmente en optimización de servidores.*\n"
+            "Por favor, inténtalo de nuevo en unos instantes."
         )
 
     payload = {
         "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
         "contents": [{"role": "user", "parts": [{"text": user_question}]}],
         "generationConfig": {
-            "temperature": 0.6,
+            "temperature": 0.5,
             "maxOutputTokens": 600,
         }
     }
@@ -73,6 +71,6 @@ def consult_ai_expert(user_question: str) -> str:
             logger.error(f"Excepción en {model}: {e}")
 
     return (
-        "⏱️ *Nuestros consultores IA están atendiendo una alta demanda en este momento.*\n\n"
-        f"Por favor, vuelve a enviar tu pregunta en un instante.\n_(Detalle: {last_error[:60]})_"
+        "⏱️ *Nuestros algoritmos analíticos están procesando un alto volumen de partidos.*\n\n"
+        f"Por favor, vuelve a enviar tu consulta en unos segundos.\n_(Detalle: {last_error[:60]})_"
     )
