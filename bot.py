@@ -97,8 +97,9 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🚀 *Tu Consultor y Academia de Negocios con IA:*\n"
         "• 🎓 *2 Lecciones prácticas:* Automatización y monetización digital.\n"
         "• 🤖 *2 Consultas IA gratis:* Pregúntale a nuestro experto cualquier duda sobre tu negocio o proyecto.\n"
-        "• ⭐ *Membresía PRO:* Acceso ilimitado a consultoría y recursos avanzados.\n\n"
+        "• ⭐ *Membresía PRO:* Consultoría y formación ilimitada por solo 1.99€ al mes.\n\n"
         "👇 *Selecciona una opción para comenzar:*"
+
     )
     await update.message.reply_text(
         welcome_text,

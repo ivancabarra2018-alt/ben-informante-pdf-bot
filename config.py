@@ -29,7 +29,8 @@ OFFICIAL_CHANNEL = "https://t.me/Accedogratis_bot"
 FREE_QUESTIONS_LIMIT = 2
 
 # Precio oficial en Euros para transparencia y cumplimiento de Telegram Ads
-PRICE_EUR = "1.99€/mes"
+PRICE_EUR = "Solo 1.99€ al mes"
+
 
 
 # Base de datos
