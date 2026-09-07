@@ -1,7 +1,5 @@
 """
-Configuración oficial de Accede Gratis (@Accedogratis_bot)
-Embudo de Conversión VIP para Tipster con Inteligencia Artificial.
-Cumplimiento normativo para Telegram Ads (Unión Europea).
+Configuración oficial de Accede Gratis Tipster VIP (@Accedogratis_bot)
 """
 import os
 from dotenv import load_dotenv
@@ -15,18 +13,15 @@ BOT_NAME = "Accede Gratis | Pronósticos & IA VIP"
 # API Key de IA (Google Gemini) - inyectada por variable de entorno
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
-# Enlace de pago oficial para el acceso VIP
-PAYMENT_URL = os.getenv("PAYMENT_URL", "https://store.kunfupay.com/elprograma/pgUKnc9F")
+DEFAULT_PAYMENT_URL = os.getenv("PAYMENT_URL", "https://store.kunfupay.com/elprograma/pgUKnc9F")
+PAYMENT_URL = DEFAULT_PAYMENT_URL
+
+# Precio oficial
+PRICE_EUR = "Solo 1.99€ al mes"
 
 # Soporte
 SUPPORT_USER = "@AccesoSoporteVIP"
 SUPPORT_URL = "https://t.me/Accedogratis_bot"
 
-# Límites de la versión gratuita
-FREE_ANALYSIS_LIMIT = 2
-
-# Precio oficial en Euros
-PRICE_EUR = "Solo 1.99€ al mes"
-
 # Base de datos
-DB_PATH = os.path.join(os.path.dirname(__file__), "data", "tipster_funnel.db")
+DB_PATH = os.path.join(os.path.dirname(__file__), "data", "tipster_pro.db")
